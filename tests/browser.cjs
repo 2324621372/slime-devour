@@ -17,6 +17,11 @@ try{
  assert.ok(a.visualRadius<.5,'Starts physically small');assert.equal(a.stage,0);assert.equal(new Set(a.prey.map(e=>e.stage)).size,6,'All six scales already exist');assert.ok(a.prey.every(e=>e.scale===e.radius));
  const initialSizes=new Map(a.prey.map(e=>[e.id,e.scale]));
  const initialCamera=a.camera;
+ const initialBugs=a.prey.filter(e=>e.kind==='bug');
+ await page.waitForTimeout(500);
+ const crawling=await get();
+ assert.ok(crawling.prey.some(e=>e.kind==='bug'&&initialBugs.some(old=>old.id===e.id&&Math.hypot(old.x-e.x,old.z-e.z)>.02)),'Insects autonomously crawl');
+ assert.ok(crawling.prey.some(e=>e.kind==='bug'&&e.gait>0),'Insect gait advances');
  assert.ok(a.sceneryColliders>100,'Authored static scenery has collision footprints');assert.equal(a.mapEdge,1000);
  await page.screenshot({path:'test-results/mobile-start.png'});
  // Real browser touch events, not clicks or a debug movement API.

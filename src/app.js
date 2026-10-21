@@ -3,9 +3,10 @@ import {createWorld} from './world.js';
 import levels from './levels.json';
 import {canEat,grow,multiplier,scoreFor,objective,starsFor,STAGES,stageFor,visibleRadius,cameraDistance} from './rules.js';
 import {jelly,spikeBall,bee,material} from './models.js';
-import {preyModel,preyKind,PREY_NAMES} from './prey.js';
+import {preyModel,preyKind,PREY_NAMES,animateInsects} from './prey.js';
 import {resolveContact,anchored} from './physics.js';
 import {CATALOG,MAP_EDGE,catalogItem} from './population.js';
+import {createFloor} from './floor.js';
 
 const $=id=>document.getElementById(id),clamp=THREE.MathUtils.clamp;
 const SAVE_KEY='slime-devour-v1';
@@ -40,7 +41,7 @@ function loadWorld(nextTheme){
  if(dynamic)scene.remove(dynamic);
  disposeWorld();world=createWorld(nextTheme);scene=world.scene;camera=world.camera;theme=nextTheme;
  scene.fog.near=1800;scene.fog.far=3200;camera.far=5000;camera.near=.05;camera.updateProjectionMatrix();
- const terrain=new THREE.Mesh(new THREE.PlaneGeometry(MAP_EDGE*2+400,MAP_EDGE*2+400),new THREE.MeshStandardMaterial({color:world.palette.ground||0x8eb796,roughness:.85}));terrain.rotation.x=-Math.PI/2;terrain.position.y=-.08;scene.add(terrain);
+ scene.add(createFloor(MAP_EDGE,world.palette));
  dynamic=new THREE.Group();dynamic.userData.dynamic=true;scene.add(dynamic);
  camera.position.set(15.5,23,26);camera.lookAt(0,0,-1);resize();
  scene.traverse(o=>{if(o.isLight&&o.shadow)o.castShadow=!qualityLow;});
@@ -85,9 +86,17 @@ function contactBody(e){const f=e.mesh.userData.footprint||{r:1},scale=e.radius;
 function applyBody(e,b){const f=e.mesh.userData.footprint||{};e.x=clamp(b.x-(f.ox||0)*e.radius,-MAP_EDGE+e.radius,MAP_EDGE-e.radius);e.z=clamp(b.z-(f.oz||0)*e.radius,-MAP_EDGE+e.radius,MAP_EDGE-e.radius);e.pushX=b.vx;e.pushZ=b.vz;}
 function collideEntities(dt){
  const solid=entities.filter(e=>!e.threat);
- for(const e of solid){const b=contactBody(e);if(!anchored(e.kind)){b.x+=b.vx*dt;b.z+=b.vz*dt;b.vx*=Math.exp(-dt*6);b.vz*=Math.exp(-dt*6);applyBody(e,b);}}
+ for(const e of solid){
+  if(e.kind==='bug'){
+   e.heading??=e.phase;e.walkTime=(e.walkTime||0)+dt;
+   e.heading+=Math.sin(e.walkTime*.8+e.phase)*dt*.65;
+   const speed=.65*Math.sqrt(e.radius),dx=Math.sin(e.heading)*speed*dt,dz=Math.cos(e.heading)*speed*dt;
+   if(blocked(e.x+dx,e.z+dz,e.radius)||Math.abs(e.x+dx)>MAP_EDGE-e.radius||Math.abs(e.z+dz)>MAP_EDGE-e.radius)e.heading+=Math.PI*.65;
+   else{e.x+=dx;e.z+=dz;}
+  }
+  const b=contactBody(e);if(!anchored(e.kind)){b.x+=b.vx*dt;b.z+=b.vz*dt;b.vx*=Math.exp(-dt*6);b.vz*=Math.exp(-dt*6);applyBody(e,b);}}
  for(let pass=0;pass<3;pass++){
-  for(let i=0;i<solid.length;i++)for(let j=i+1;j<solid.length;j++){const a=solid[i],b=solid[j];if(Math.abs(a.x-b.x)>a.radius*2+b.radius*2||Math.abs(a.z-b.z)>a.radius*2+b.radius*2)continue;const ab=contactBody(a),bb=contactBody(b);if(resolveContact(ab,bb,0)){applyBody(a,ab);applyBody(b,bb);}}
+  for(let i=0;i<solid.length;i++)for(let j=i+1;j<solid.length;j++){const a=solid[i],b=solid[j];if(Math.abs(a.x-b.x)>a.radius*2+b.radius*2||Math.abs(a.z-b.z)>a.radius*2+b.radius*2)continue;const ab=contactBody(a),bb=contactBody(b);if(resolveContact(ab,bb,0)){applyBody(a,ab);applyBody(b,bb);if(a.kind==='bug')a.heading=Math.atan2(-ab.x+bb.x,-ab.z+bb.z)+Math.PI;if(b.kind==='bug')b.heading=Math.atan2(bb.x-ab.x,bb.z-ab.z);}}
   for(const e of solid){const body=contactBody(e),p={x:playerPos.x,z:playerPos.y,r:displayRadius()*.94,vx:velocity.x,vz:velocity.y,invMass:1/Math.max(.08,state.radius**3)};const hit=resolveContact(p,body,0);if(!hit)continue;
    if(canEat(state.radius,e.radius)){eat(e);solid.splice(solid.indexOf(e),1);continue;}
    playerPos.set(p.x,p.z);velocity.set(p.vx,p.vz);applyBody(e,body);state.contacts++;player.userData.bounce=.12;
@@ -178,6 +187,7 @@ function updateBoss(dt){if(!boss||boss.hp<=0)return;const b=boss;b.phase+=dt;b.h
  if(level.id===12&&cycle<3.6&&dist<6){playerPos.x+=dx/dist*dt*.25;playerPos.y+=dz/dist*dt*.25;}
 }
 function update(dt){
+ animateInsects(state.elapsed);
  state.elapsed+=dt;state.invincible=Math.max(0,state.invincible-dt);if(state.elapsed-state.lastEat>1.2)state.combo=0;
  let ix=input.x,iy=input.y;ix+=(keys.has('d')||keys.has('arrowright')?1:0)-(keys.has('a')||keys.has('arrowleft')?1:0);iy+=(keys.has('s')||keys.has('arrowdown')?1:0)-(keys.has('w')||keys.has('arrowup')?1:0);const il=Math.hypot(ix,iy);if(il>1){ix/=il;iy/=il;}
  const speed=(level.id===8?5.8:4.8)*level.speed*(1+Math.sqrt(state.radius)*.09);const targetX=(ix*.867+iy*.498)*speed,targetZ=(-ix*.498+iy*.867)*speed;
@@ -189,7 +199,7 @@ function update(dt){
  for(const e of [...entities]){
   e.age+=dt;const dx=playerPos.x-e.x,dz=playerPos.y-e.z,dist=Math.hypot(dx,dz)||.001;
   if(e.threat){if(e.kind==='bee'){e.x+=dx/dist*dt*1.25;e.z+=dz/dist*dt*1.25;}else if(level.id===2){/* Fixed obstacles teach safe routes. */}else if(e.kind==='ball'){e.x+=Math.cos(e.phase)*dt*2.5;e.z+=Math.sin(e.phase)*dt*2.5;if(Math.abs(e.x)>8.5||Math.abs(e.z)>10)e.phase+=Math.PI;}else {e.x+=Math.cos(e.phase+state.elapsed*.45)*dt*.7;e.z+=Math.sin(e.phase+state.elapsed*.45)*dt*.7;}}
-  placeEntity(e);e.mesh.position.y=e.threat?.13+Math.sin(e.phase+state.elapsed*3)*.035:.12;e.mesh.rotation.y=0;
+  placeEntity(e);e.mesh.position.y=e.threat?.13+Math.sin(e.phase+state.elapsed*3)*.035:.12;e.mesh.rotation.y=e.kind==='bug'?(e.heading??e.phase):0;if(e.kind==='bug'){e.mesh.position.y+=Math.sin(state.elapsed*13+e.phase)*e.radius*.018;e.mesh.rotation.z=Math.sin(state.elapsed*13+e.phase)*.025;}
   const edible=!e.threat&&canEat(state.radius,e.radius);e.mesh.userData.body?.material?.emissive.setHex(edible?0x092119:0x000000);
   if(e.threat&&dist<pr*.94+e.visual*.8)damage();
  }
@@ -210,5 +220,5 @@ try{
  renderer.domElement.addEventListener('webglcontextlost',e=>{e.preventDefault();showPause();toast('图形上下文暂时中断，请刷新恢复');});
  loadWorld(0);applyQuality();start(1,'level');requestAnimationFrame(animate);
  // Read-only diagnostics help verify offline and mobile builds without altering play.
- Object.defineProperty(window,'slimeGame',{value:{snapshot:()=>({...state,mode,level:level.id,paused,ended,entities:entities.length,frame,drawCalls:renderer.info.render.calls,qualityLow,stage,stageName:STAGES[stage].name,visualRadius:displayRadius(),camera:{x:camera.position.x,y:camera.position.y,z:camera.position.z,distance:camera.position.distanceTo(camTarget),target:{x:camTarget.x,y:camTarget.y,z:camTarget.z},playerNDC:player.position.clone().add(new THREE.Vector3(0,displayRadius()*.45,0)).project(camera).toArray()},position:{x:playerPos.x,z:playerPos.y},animation:{gait:player.userData.gait,eatPulse:player.userData.eatPulse,swallows:swallows.length,scale:player.scale.toArray(),height:player.position.y},mapEdge:MAP_EDGE,sceneryColliders:world.colliders.length,spawnChecks:[...spawnChecks],prey:entities.filter(e=>!e.threat).map(e=>({id:e.id,scale:e.mesh.scale.x,x:e.x,z:e.z,radius:e.radius,kind:e.kind,name:PREY_NAMES[e.kind],stage:e.preyStage,edible:canEat(state.radius,e.radius)})),saved:JSON.parse(JSON.stringify(save))})}});
+ Object.defineProperty(window,'slimeGame',{value:{snapshot:()=>({...state,mode,level:level.id,paused,ended,entities:entities.length,frame,drawCalls:renderer.info.render.calls,qualityLow,stage,stageName:STAGES[stage].name,visualRadius:displayRadius(),camera:{x:camera.position.x,y:camera.position.y,z:camera.position.z,distance:camera.position.distanceTo(camTarget),target:{x:camTarget.x,y:camTarget.y,z:camTarget.z},playerNDC:player.position.clone().add(new THREE.Vector3(0,displayRadius()*.45,0)).project(camera).toArray()},position:{x:playerPos.x,z:playerPos.y},animation:{gait:player.userData.gait,eatPulse:player.userData.eatPulse,swallows:swallows.length,scale:player.scale.toArray(),height:player.position.y},mapEdge:MAP_EDGE,sceneryColliders:world.colliders.length,spawnChecks:[...spawnChecks],prey:entities.filter(e=>!e.threat).map(e=>({id:e.id,scale:e.mesh.scale.x,heading:e.heading,gait:e.walkTime||0,x:e.x,z:e.z,radius:e.radius,kind:e.kind,name:PREY_NAMES[e.kind],stage:e.preyStage,edible:canEat(state.radius,e.radius)})),saved:JSON.parse(JSON.stringify(save))})}});
 }catch(error){console.error(error);$('loading').hidden=true;$('error').hidden=false;$('error').textContent='无法启动 3D 画面。请使用支持 WebGL 2 的新版 Chrome、Edge 或 Safari，并开启浏览器硬件加速。';}

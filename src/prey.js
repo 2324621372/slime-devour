@@ -49,6 +49,23 @@ function build(kind){
  g.traverse(o=>{if(o.isMesh){const geo=o.geometry.clone().applyMatrix4(o.matrixWorld);geo.scale(unit,unit,unit);geo.translate(0,-bounds.min.y*unit,0);const color=o.material.color;const flat=geo.index?geo.toNonIndexed():geo;const array=new Float32Array(flat.attributes.position.count*3);for(let i=0;i<array.length;i+=3){array[i]=color.r;array[i+1]=color.g;array[i+2]=color.b;}flat.setAttribute('color',new THREE.BufferAttribute(array,3));parts.push(flat);o.geometry.dispose();}});
  const geometry=mergeGeometries(parts,false);parts.forEach(p=>p.dispose());geometry.userData.shared=true;
  const m=new THREE.MeshStandardMaterial({vertexColors:true,roughness:.42,metalness:.03});
+ if(kind==='bug'){
+  const position=geometry.attributes.position,weights=new Float32Array(position.count*2);
+  for(let i=0;i<position.count;i++){
+   const x=position.getX(i)/unit,y=position.getY(i)/unit+bounds.min.y,z=position.getZ(i)/unit;
+   weights[i*2]=y<.29&&Math.abs(x)>.28?Math.sign(x)*(1-Math.min(1,y/.32)):0;
+   weights[i*2+1]=y>.55&&z>.65?1:0;
+  }
+  geometry.setAttribute('gaitWeight',new THREE.BufferAttribute(weights,2));
+  const clock={value:0};m.userData.clock=clock;
+  m.onBeforeCompile=shader=>{shader.uniforms.bugTime=clock;shader.vertexShader='uniform float bugTime;\nattribute vec2 gaitWeight;\n'+shader.vertexShader;
+   shader.vertexShader=shader.vertexShader.replace('#include <begin_vertex>',`#include <begin_vertex>
+    float gait=sin(bugTime*13.0+position.z*9.0+step(0.0,gaitWeight.x)*3.14159);
+    transformed.z+=gait*abs(gaitWeight.x)*${(.16*unit).toFixed(6)};
+    transformed.y+=max(0.0,gait)*abs(gaitWeight.x)*${(.09*unit).toFixed(6)};
+    transformed.x+=sin(bugTime*5.0+position.x*7.0)*gaitWeight.y*${(.045*unit).toFixed(6)};`);
+  };
+ }
  const round=['dust','sugar','bug','cap','fruit','pet','streetlamp'].includes(kind);
  // Ground silhouettes exclude projecting lamps and high balconies.
  const footprint=kind==='streetlamp'?{r:.28*unit,ox:0,oz:0}:round?{r:Math.max(size.x,size.z)*unit*.5,ox:(bounds.min.x+bounds.max.x)*unit*.5,oz:(bounds.min.z+bounds.max.z)*unit*.5}:{hx:size.x*unit*.5,hz:size.z*unit*.5,ox:(bounds.min.x+bounds.max.x)*unit*.5,oz:(bounds.min.z+bounds.max.z)*unit*.5};
@@ -56,3 +73,4 @@ function build(kind){
 }
 export function preyModel(kind){if(!templates.has(kind))templates.set(kind,build(kind));const t=templates.get(kind);const o=new THREE.Mesh(t.geometry,t.material);o.castShadow=true;o.receiveShadow=true;o.userData.kind=kind;o.userData.footprint=t.footprint;return o;}
 export function preyKind(stage,index=Math.random()){const list=STAGES[stage].prey;return list[Math.floor(index*list.length)%list.length];}
+export function animateInsects(time){const t=templates.get('bug');if(t)t.material.userData.clock.value=time;}
