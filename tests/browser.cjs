@@ -26,8 +26,15 @@ try{
  await page.screenshot({path:'test-results/mobile-start.png'});
  // Real browser touch events, not clicks or a debug movement API.
  const cdp=await context.newCDPSession(page);
+ assert.equal(await page.locator('#joystick').isVisible(),false,'Floating stick starts hidden');
+ await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:120,y:450}]});
+ assert.equal(await page.locator('#joystick').isVisible(),true);
+ const stick=await page.locator('#joystick').boundingBox();assert.ok(Math.abs(stick.x+stick.width/2-120)<1);assert.ok(Math.abs(stick.y+stick.height/2-450)<1);assert.ok(stick.width>=120);
+ await cdp.send('Input.dispatchTouchEvent',{type:'touchCancel',touchPoints:[]});
+ assert.equal(await page.locator('#joystick').isVisible(),false,'Cancellation hides stick');
  await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:195,y:610}]});await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:232,y:584}]});await page.waitForTimeout(600);await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
  let b=await get();assert.ok(Math.hypot(b.position.x-a.position.x,b.position.z-a.position.z)>.4,'Touch drag moves player');
+ assert.equal(await page.locator('#joystick').isVisible(),false,'Release hides stick');
  assert.ok(b.animation.gait>a.animation.gait,'Locomotion animation advances');
  await page.waitForTimeout(400);b=await get();assert.ok(Math.hypot(b.camera.target.x-initialCamera.target.x,b.camera.target.z-initialCamera.target.z)>.3,'Camera follows movement');assert.ok(Math.abs(b.camera.playerNDC[0])<.12&&Math.abs(b.camera.playerNDC[1])<.12,'Player stays near screen centre');
  await page.locator('#pause').tap();a=await get();assert.equal(a.paused,true);await page.waitForTimeout(250);b=await get();assert.equal(a.elapsed,b.elapsed);await page.locator('#resume').tap();assert.equal((await get()).paused,false);

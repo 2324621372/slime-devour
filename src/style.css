@@ -7,3 +7,6 @@
 .controls{gap:8px}.stat{width:auto;flex:1;min-width:0}.stat b{font-size:14px}
 .tools{gap:6px}.tools button{min-width:44px;min-height:44px;font-size:13px;padding:9px}#mode{min-height:44px;font-size:12px}#pause,#restart{font-size:23px;min-width:44px}#levelName{min-height:36px;min-width:120px;text-align:left}.actions button{min-height:48px}#hint{font-size:12px;margin-bottom:8px}.help{font-size:10px;opacity:.9}
 @media(max-height:700px){#joystick{width:120px;height:120px;flex-basis:120px}#joystick::after{top:45px}#knob{width:54px;height:54px}footer{padding-top:8px}.help{margin-top:4px}}
+
+/* Floating joystick stays centered at the active finger origin. */
+#joystick{position:absolute;z-index:5;transform:translate(-50%,-50%);pointer-events:none;margin:0}footer .controls{min-height:44px}
