@@ -4,6 +4,7 @@ import levels from './levels.json';
 import {canEat,grow,multiplier,scoreFor,objective,starsFor,STAGES,stageFor,renderReference,visibleRadius,cameraDistance} from './rules.js';
 import {jelly,spikeBall,bee,material} from './models.js';
 import {preyModel,preyKind,PREY_NAMES} from './prey.js';
+import {resolveContact,anchored} from './physics.js';
 
 const $=id=>document.getElementById(id),clamp=THREE.MathUtils.clamp;
 const SAVE_KEY='slime-devour-v1';
@@ -62,6 +63,29 @@ function makePrey(initial=false,chain=false){
 }
 function makeThreat(){if(level.id===1&&mode==='level')return;const pos=entityPosition();let kind=level.id===5?'bee':level.id===6?'ball':'spike';const mesh=kind==='bee'?bee():kind==='ball'?jelly(0xeb849f):spikeBall();dynamic.add(mesh);const e={mesh,radius:state.radius*(1.35+Math.random()*.8),x:pos.x,z:pos.z,phase:Math.random()*6.28,threat:true,kind,age:0,vx:0,vz:0};entities.push(e);placeEntity(e);}
 function placeEntity(e){const r=e.threat?clamp(e.radius/screenScale(),.7,1.4):clamp(e.radius/screenScale(),.035,5);e.visual=r;e.mesh.position.set(e.x,.12,e.z);e.mesh.scale.setScalar(r);}
+function contactBody(e){return {x:e.x,z:e.z,r:e.visual*(e.mesh.userData.footprint||1)*.72,vx:e.pushX||0,vz:e.pushZ||0,invMass:anchored(e.kind)?0:1/Math.max(.08,e.visual**3)};}
+function applyBody(e,b){
+ const r=Math.min(.9,b.r);const x=clamp(b.x,-8.7+r,8.7-r),z=clamp(b.z,-10.4+r,10.4-r);
+ if(!blocked(x,e.z,r))e.x=x;else b.vx=0;
+ if(!blocked(e.x,z,r))e.z=z;else b.vz=0;
+ e.pushX=b.vx;e.pushZ=b.vz;
+}
+function collideEntities(dt){
+ const solid=entities.filter(e=>!e.threat);
+ // Two passes stabilize chains of touching objects without a physics dependency.
+ for(let pass=0;pass<2;pass++)for(let i=0;i<solid.length;i++)for(let j=i+1;j<solid.length;j++){
+  const a=solid[i],b=solid[j],ab=contactBody(a),bb=contactBody(b),hit=resolveContact(ab,bb);
+  if(hit){applyBody(a,ab);applyBody(b,bb);a.impact=Math.max(a.impact||0,.08);b.impact=Math.max(b.impact||0,.08);}
+ }
+ for(const e of solid){
+  const b=contactBody(e);b.x+=b.vx*dt;b.z+=b.vz*dt;b.vx*=Math.exp(-dt*5);b.vz*=Math.exp(-dt*5);applyBody(e,b);
+  if(!canEat(state.radius,e.radius)){
+   const p={x:playerPos.x,z:playerPos.y,r:displayRadius()*.8,vx:velocity.x,vz:velocity.y,invMass:1/Math.max(.08,displayRadius()**3)},body=contactBody(e),hit=resolveContact(p,body,.12);
+   if(hit){const px=clamp(p.x,-8.9,8.9),pz=clamp(p.z,-10.7,10.7);if(!blocked(px,playerPos.y,displayRadius()))playerPos.x=px;if(!blocked(playerPos.x,pz,displayRadius()))playerPos.y=pz;velocity.set(p.vx,p.vz);applyBody(e,body);player.userData.bounce=.18;e.impact=.18;state.contacts++;}
+  }
+  placeEntity(e);e.impact=Math.max(0,(e.impact||0)-dt);const wobble=Math.sin(e.impact*40)*e.impact;e.mesh.rotation.z=wobble*.35;e.mesh.rotation.x=-wobble*.25;
+ }
+}
 function clearDynamic(){
  pooled.forEach(o=>dynamic.add(o));
  const uniqueGeometries=new Set(),uniqueMaterials=new Set();
@@ -70,7 +94,7 @@ function clearDynamic(){
 }
 function start(id=1,newMode=mode){
  resetInput();mode=newMode;level=levels[clamp(id,1,12)-1];ended=false;paused=false;stage=0;cityWaveAt=0;spawnClock=0;hudClock=0;
- state={radius:mode==='endless'?.3:level.radius,score:0,combo:0,maxCombo:0,eaten:0,elapsed:0,lastEat:-10,hits:0,hp:3,invincible:0,bossHP:[4,10,12].includes(level.id)?(level.id===10?3:2):0,bossTotal:level.id===10?3:2,peakRadius:level.radius};
+ state={radius:mode==='endless'?.3:level.radius,score:0,contacts:0,combo:0,maxCombo:0,eaten:0,elapsed:0,lastEat:-10,hits:0,hp:3,invincible:0,bossHP:[4,10,12].includes(level.id)?(level.id===10?3:2):0,bossTotal:level.id===10?3:2,peakRadius:level.radius};
  stage=stageFor(state.radius);
  const nextTheme=mode==='endless'?0:([2,6,8,11].includes(level.id)?1:[4,10,12].includes(level.id)?2:0);
  if(dynamic)clearDynamic();loadWorld(nextTheme);playerPos.set(0,3);velocity.set(0,0);
@@ -141,10 +165,11 @@ function update(dt){
   e.age+=dt;const dx=playerPos.x-e.x,dz=playerPos.y-e.z,dist=Math.hypot(dx,dz)||.001;
   if(e.threat){if(e.kind==='bee'){e.x+=dx/dist*dt*1.25;e.z+=dz/dist*dt*1.25;}else if(level.id===2){/* Fixed obstacles teach safe routes. */}else if(e.kind==='ball'){e.x+=Math.cos(e.phase)*dt*2.5;e.z+=Math.sin(e.phase)*dt*2.5;if(Math.abs(e.x)>8.5||Math.abs(e.z)>10)e.phase+=Math.PI;}else {e.x+=Math.cos(e.phase+state.elapsed*.45)*dt*.7;e.z+=Math.sin(e.phase+state.elapsed*.45)*dt*.7;}}
   else{const moving=['bug','pet'].includes(e.kind);const flee=moving&&level.id>2&&dist<2.5&&state.radius>e.radius?-.3:0;const xx=e.x+((moving?e.vx:0)+dx/dist*flee)*dt,zz=e.z+((moving?e.vz:0)+dz/dist*flee)*dt;if(Math.abs(xx)<8.7&&!blocked(xx,e.z,.2))e.x=xx;else e.vx*=-1;if(Math.abs(zz)<10.4&&!blocked(e.x,zz,.2))e.z=zz;else e.vz*=-1;}
-  placeEntity(e);e.mesh.position.y=.13+Math.sin(e.phase+state.elapsed*3)*.035;e.mesh.rotation.y=.5+Math.sin(e.phase+state.elapsed)*.2;
+  placeEntity(e);e.mesh.position.y=e.threat?.13+Math.sin(e.phase+state.elapsed*3)*.035:.12;e.mesh.rotation.y=.5+(['bug','pet'].includes(e.kind)?Math.sin(e.phase+state.elapsed)*.2:0);
   const edible=!e.threat&&canEat(state.radius,e.radius);e.mesh.userData.body?.material?.emissive.setHex(edible?0x092119:0x000000);
   if(dist<pr*.67+e.visual*.65){if(edible)eat(e);else if(e.threat)damage();}
  }
+ collideEntities(dt);
  spawnClock+=dt;if(spawnClock>=Math.max(.45,level.spawnInterval*(mode==='endless'?Math.max(.35,1-stage*.1):1))){spawnClock=0;for(let i=0;i<3;i++)makePrey();if(entities.filter(e=>e.threat).length<(mode==='endless'?Math.min(8,2+stage):Math.min(level.maxThreats,level.initialThreats)))makeThreat();}
  for(const h of hazards){const active=state.elapsed%6>3;h.mesh.visible=active;if(active&&Math.abs(playerPos.x-h.x)<pr*.65+.1&&Math.abs(playerPos.y)<3.5)damage();}
  if(level.id===10&&Math.abs(playerPos.x)>7.8&&mode==='level')damage();

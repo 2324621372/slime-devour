@@ -3,8 +3,20 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {canEat,grow,multiplier,scoreFor,objective,starsFor,stageFor,visibleRadius,cameraDistance,STAGES} from '../src/rules.js';
 import {preyModel} from '../src/prey.js';
+import {resolveContact,anchored} from '../src/physics.js';
 const levels=JSON.parse(await readFile(new URL('../src/levels.json',import.meta.url)));
 const state=()=>({radius:.45,eaten:0,elapsed:0,maxCombo:0,hits:0,score:0,bossHP:2,bossTotal:2});
+test('contacts separate bodies and transfer momentum without adding energy',()=>{
+ const a={x:0,z:0,r:1,vx:3,vz:0,invMass:1},b={x:1.5,z:0,r:1,vx:0,vz:0,invMass:1};
+ assert.ok(resolveContact(a,b));assert.ok(Math.abs(b.x-a.x-2)<1e-8);assert.ok(b.vx>0);assert.ok(a.vx*a.vx+b.vx*b.vx<=9);
+ assert.equal(resolveContact(a,b),false);
+});
+test('anchored objects stop player; coincident bodies stay finite; glancing contact preserves tangent velocity',()=>{
+ const a={x:0,z:0,r:.5,vx:2,vz:1,invMass:1},b={x:.7,z:0,r:.5,vx:0,vz:0,invMass:0};
+ resolveContact(a,b);assert.equal(b.x,.7);assert.ok(a.vx<=0);assert.equal(a.vz,1);
+ const c={x:0,z:0,r:1},d={x:0,z:0,r:1};resolveContact(c,d);assert.equal(Math.abs(c.x-d.x),2);
+ assert.equal(anchored('tower'),true);assert.equal(anchored('car'),false);
+});
 test('edibility boundary and volume conservation',()=>{assert.equal(canEat(1,.95),true);assert.equal(canEat(1,.951),false);assert.ok(Math.abs(grow(1,.5,.85)**3-(1+.125*.85))<1e-10);});
 test('combo cap, dangerous and perfect prey reward',()=>{assert.equal(multiplier(50),5);assert.equal(multiplier(500),5);assert.ok(scoreFor(1,.94,8).points>scoreFor(1,.6,8).points);assert.equal(scoreFor(1,.94,8).perfect,true);});
 test('all twelve main goals are reachable and initially incomplete',()=>{assert.equal(levels.length,12);for(const level of levels){assert.equal(objective(level,state()).done,false,level.name);const s={...state(),radius:10,eaten:100,elapsed:120,maxCombo:30,bossHP:0};assert.equal(objective(level,s).done,true,level.name);}});
