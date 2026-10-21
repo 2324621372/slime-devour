@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import {detailedBox} from './geometry.js';
 import {mergeGeometries} from 'three/addons/utils/BufferGeometryUtils.js';
 import {material} from './models.js';
 import {STAGES} from './rules.js';
@@ -8,10 +9,10 @@ const templates=new Map();
 function build(kind){
  const g=new THREE.Group();
  function add(geo,c,x,y,z,sx=1,sy=sx,sz=sx){const m=new THREE.Mesh(geo,material(c));m.position.set(x,y,z);m.scale.set(sx,sy,sz);g.add(m);return m;}
- const box=(x,y,z,w,h,d,c)=>add(new THREE.BoxGeometry(w,h,d),c,x,y,z);
+ const box=(x,y,z,w,h,d,c)=>add(detailedBox(w,h,d),c,x,y,z);
  const orb=(x,y,z,r,c,sx=1,sy=1,sz=1)=>add(new THREE.SphereGeometry(r,20,12),c,x,y,z,sx,sy,sz);
- const cylinder=(x,y,z,r,h,c)=>add(new THREE.CylinderGeometry(r,r,h,16),c,x,y,z);
- const ring=(x,y,z,r,t,c)=>{const o=add(new THREE.TorusGeometry(r,t,6,20),c,x,y,z);o.rotation.x=Math.PI/2;return o;};
+ const cylinder=(x,y,z,r,h,c)=>add(new THREE.CylinderGeometry(r,r,h,32),c,x,y,z);
+ const ring=(x,y,z,r,t,c)=>{const o=add(new THREE.TorusGeometry(r,t,10,40),c,x,y,z);o.rotation.x=Math.PI/2;return o;};
  switch(kind){
   case 'dust':for(let i=0;i<7;i++){const a=i*2.4;orb(Math.cos(a)*.32,.27+(i%3)*.08,Math.sin(a)*.3,.29,[0xb7b8a7,0xc5c9b8,0xd7d5ba][i%3],1,.8,1);}break;
   case 'sugar':box(0,.37,0,.65,.65,.65,0xffd6e5);for(let i=0;i<12;i++){const a=i*2.4;orb(Math.cos(a)*.28,.72,Math.sin(a)*.28,.035,0xfff2db);}break;
@@ -44,6 +45,12 @@ function build(kind){
   case 'streetlamp':for(let i=0;i<4;i++){const a=i*Math.PI/2;orb(Math.cos(a)*.19,.23,Math.sin(a)*.19,.03,0x526c74);}ring(0,.36,0,.09,.025,0xc2b998);ring(0,1.6,0,.08,.018,0xc2b998);box(.55,1.77,0,.27,.025,.2,0xffefba);for(const x of [.42,.68])rod([x,1.78,-.12],[x,1.95,-.12],.012,0x5d7c80);break;
   case 'building':case 'tower':{const h=kind==='tower'?2.4:1.5;for(let y=.3;y<h-.1;y+=.3){box(0,y-.12,.46,1.05,.045,.12,0xe4d4bc);for(const x of [-.3,0,.3]){box(x-.095,y,.455,.018,.2,.025,0x698393);box(x+.095,y,.455,.018,.2,.025,0x698393);box(x,y,.457,.014,.16,.025,0xdfd3b9);}if(kind==='building'){box(0,y-.08,.57,.8,.035,.25,0xb4aaa2);for(const x of [-.38,-.19,0,.19,.38])rod([x,y-.06,.69],[x,y+.08,.69],.009,0x7d9293);rod([-.4,y+.08,.69],[.4,y+.08,.69],.012,0x7d9293);}}box(0,.035,.59,.5,.07,.3,0xddd5c2);box(0,.42,.49,.4,.06,.2,0x94b5b5);for(const x of [-.3,.3]){box(x,h+.2,0,.2,.2,.3,0x82969b);for(let i=0;i<3;i++)box(x,h+.31,-.1+i*.1,.16,.02,.015,0xd7d9ce);}break;}
  }
+ // Small surface structures remain within the original silhouette.
+ if(kind==='cup'){for(let i=0;i<24;i++){const a=i*Math.PI/12;orb(Math.cos(a)*.475,.3,Math.sin(a)*.475,.018,0x9dbcb5);}ring(0,.13,0,.45,.018,0xa5c6bc);}
+ if(kind==='fruit'){for(let i=0;i<36;i++){const a=i*2.399,y=.15+(i%7)*.1,r=Math.sqrt(Math.max(0,.54*.54-(y-.5)**2));orb(Math.cos(a)*r,y,Math.sin(a)*r,.012,0xfbd0a0);}}
+ if(kind==='car'){for(const x of [-.683,.683])for(const z of [-.56,.56]){const hub=cylinder(x,.25,z,.13,.014,0xc9d4d4);hub.rotation.z=Math.PI/2;for(let i=0;i<5;i++){const a=i*Math.PI*2/5;orb(x,.25+Math.cos(a)*.085,z+Math.sin(a)*.085,.019,0x728a96);}}for(const x of [-.48,.48])box(x,.68,-.1,.08,.035,.2,0xe4e0d1);}
+ if(kind==='chair'){for(const x of [-.3,0,.3])for(const y of [.78,1.04])orb(x,y,-.235,.025,0xc1cfd4);}
+ if(kind==='building'||kind==='tower'){const height=kind==='tower'?2.4:1.5;for(let y=.3;y<height-.1;y+=.3){box(0,y-.11,.448,.94,.025,.025,0xe2d6c0);for(const x of [-.3,0,.3])box(x,y,.452,.014,.16,.018,0xd2dcda);}for(let i=0;i<4;i++)box(-.18+i*.12,height+.13,-.15,.075,.08,.26,0x9baeb1);}
  // Normalize a type once, share its geometry across all instances and pools.
  g.updateMatrixWorld(true);const bounds=new THREE.Box3().setFromObject(g),size=bounds.getSize(new THREE.Vector3());const unit=1/Math.max(size.x/2,size.z/2,size.y*.65);const parts=[];
  g.traverse(o=>{if(o.isMesh){const geo=o.geometry.clone().applyMatrix4(o.matrixWorld);geo.scale(unit,unit,unit);geo.translate(0,-bounds.min.y*unit,0);const color=o.material.color;const flat=geo.index?geo.toNonIndexed():geo;const array=new Float32Array(flat.attributes.position.count*3);for(let i=0;i<array.length;i+=3){array[i]=color.r;array[i+1]=color.g;array[i+2]=color.b;}flat.setAttribute('color',new THREE.BufferAttribute(array,3));parts.push(flat);o.geometry.dispose();}});

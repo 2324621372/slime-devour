@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import {detailedBox} from './geometry.js';
 import {mergeGeometries} from 'three/addons/utils/BufferGeometryUtils.js';
 
 // Permanent scenery is generated once per map, independently of player growth.
@@ -16,9 +17,9 @@ export function addDistricts(scene,colliders,theme,edge){
  for(let type=0;type<12;type++){
   const pieces=[];
   function part(geometry,color,x,y,z,rx=0,ry=0,rz=0){const matrix=new THREE.Matrix4().compose(new THREE.Vector3(x,y,z),new THREE.Quaternion().setFromEuler(new THREE.Euler(rx,ry,rz)),new THREE.Vector3(1,1,1));const raw=geometry.index?geometry.toNonIndexed():geometry;raw.applyMatrix4(matrix);const colors=new Float32Array(raw.attributes.position.count*3),c=new THREE.Color(color);for(let i=0;i<colors.length;i+=3){colors[i]=c.r;colors[i+1]=c.g;colors[i+2]=c.b;}raw.setAttribute('color',new THREE.BufferAttribute(colors,3));pieces.push(raw);if(raw!==geometry)geometry.dispose();}
-  const box=(x,y,z,w,h,d,c)=>part(new THREE.BoxGeometry(w,h,d),c,x,y,z);
-  const cyl=(x,y,z,r,h,c)=>part(new THREE.CylinderGeometry(r,r,h,12),c,x,y,z);
-  const ball=(x,y,z,r,c)=>part(new THREE.IcosahedronGeometry(r,1),c,x,y,z);
+  const box=(x,y,z,w,h,d,c)=>part(detailedBox(w,h,d),c,x,y,z);
+  const cyl=(x,y,z,r,h,c)=>part(new THREE.CylinderGeometry(r,r,h,24),c,x,y,z);
+  const ball=(x,y,z,r,c)=>part(new THREE.IcosahedronGeometry(r,2),c,x,y,z);
   let hx=1,hz=1;
   switch(type){
    case 0:
@@ -47,10 +48,23 @@ export function addDistricts(scene,colliders,theme,edge){
    case 9:
     hx=.6;hz=.18;for(const x of [-.45,.45])box(x,1,0,.1,2,.12,metal);box(0,1.9,0,1.5,1.1,.2,wall);box(0,1.9,.12,1.25,.8,.045,metal);for(let i=0;i<3;i++)box(0,2.12-i*.22,.15,.85-i*.1,.07,.035,trim);break;
    case 10:
-    hx=2;hz=.7;for(const x of [-1.8,1.8]){box(x,1,0,.13,2,1.3,metal);}for(const z of [-.4,0,.4])part(new THREE.CylinderGeometry(.13,.13,4,10),accent,0,1.75,z,0,0,Math.PI/2);for(const x of [-1,1])box(x,1.8,0,.12,.45,1.35,trim);break;
+    hx=2;hz=.7;for(const x of [-1.8,1.8]){box(x,1,0,.13,2,1.3,metal);}for(const z of [-.4,0,.4])part(new THREE.CylinderGeometry(.13,.13,4,24),accent,0,1.75,z,0,0,Math.PI/2);for(const x of [-1,1])box(x,1.8,0,.12,.45,1.35,trim);break;
    case 11:
     hx=hz=1.8;cyl(0,.18,0,1.8,.35,metal);cyl(0,.4,0,1.55,.25,trim);cyl(0,.55,0,1.3,.05,accent);cyl(0,1,0,.24,1.1,wall);cyl(0,1.55,0,.8,.16,trim);ball(0,1.85,0,.3,light);break;
   }
+  // Model-specific fittings are baked into the shared instance template.
+  if(type===0){for(const x of [-1.7,1.7]){box(x,1.27,2.15,1.12,.09,.24,trim);box(x,2.34,2.1,1.05,.07,.13,trim);}box(.3,1,2.18,.08,.08,.05,trim);for(let i=0;i<5;i++)box(.88+i*.16,3.85,-.28,.06,.07,.04,trim);}
+  if(type===1){for(const y of [.55,2.9])for(let i=0;i<12;i++){const a=i*Math.PI/6;ball(Math.cos(a)*1.055,y,Math.sin(a)*1.055,.045,metal);}cyl(0,3.5,0,.32,.14,metal);}
+  if(type===2){for(const x of [-1.2,1.2])for(const z of [-.35,0,.35])ball(x,.825,z,.034,metal);for(const y of [1.08,1.34,1.6])box(0,y,-.575,3.05,.025,.025,trim);}
+  if(type===3){for(let i=0;i<5;i++){box(-.55+i*.275,.8,.864,.025,1.35,.018,accent);box(.864,.8,-.55+i*.275,.018,1.35,.025,accent);}for(const x of [-.7,.7])for(const y of [.2,1.4])ball(x,y,.915,.045,metal);}
+  if(type===4){for(const x of [-1.43,1.43])box(x,.37,0,.08,.28,1.85,trim);for(let i=0;i<5;i++){const x=-1+i*.5;ball(x-.12,1.02,0,.11,leaves);ball(x+.12,1.1,.05,.1,leaves);}}
+  if(type===5){for(let i=0;i<4;i++){const a=i*Math.PI/2;part(new THREE.CylinderGeometry(.055,.1,.8,10),metal,Math.cos(a)*.4,2.25,Math.sin(a)*.4,Math.sin(a)*.6,0,-Math.cos(a)*.6);}}
+  if(type===6){for(const x of [-.24,.24])for(const z of [-.24,.24])ball(x,.32,z,.045,trim);cyl(0,2.65,0,.18,.1,trim);cyl(0,3.65,0,.1,.2,metal);}
+  if(type===7){box(0,1.17,.67,.025,2.05,.025,metal);for(const x of [-.12,.12])box(x,1.25,.71,.045,.26,.05,trim);for(const x of [-.85,.85])for(const y of [.3,2.1])ball(x,y,.68,.045,metal);}
+  if(type===8){for(const x of [-1.4,-.95,-.5,.5,.95,1.4])box(x,.83,0,.055,.72,.065,metal);}
+  if(type===9){for(const x of [-.6,.6])for(const y of [1.5,2.3])ball(x,y,.155,.04,trim);box(0,1.15,0,.85,.08,.34,trim);}
+  if(type===10){for(const x of [-1,1])for(const z of [-.4,0,.4]){part(new THREE.TorusGeometry(.17,.035,8,24),metal,x,1.75,z,0,Math.PI/2,0);}for(const x of [-1.8,1.8])box(x,.1,0,.45,.16,1.45,trim);}
+  if(type===11){for(let i=0;i<12;i++){const a=i*Math.PI/6;ball(Math.cos(a)*1.6,.38,Math.sin(a)*1.6,.06,accent);}cyl(0,1.26,0,.29,.09,trim);}
   const geometry=mergeGeometries(pieces,false);pieces.forEach(g=>g.dispose());templates.push({geometry,hx,hz});
  }
  const material=new THREE.MeshStandardMaterial({vertexColors:true,roughness:.65});

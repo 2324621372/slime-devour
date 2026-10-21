@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import {detailedBox} from './geometry.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 export function createWorld(theme=0) {
 
@@ -13,16 +14,16 @@ const sun=new THREE.DirectionalLight(p.light,theme===2?3:4);sun.position.set(-7,
 const rim=new THREE.DirectionalLight(0x96e9ff,1.6);rim.position.set(10,8,-10);scene.add(rim);
 function mat(c,metal=0,rough=.55){return new THREE.MeshStandardMaterial({color:c,metalness:metal,roughness:rough});}
 function mesh(geo,m,x,y,z,parent=scene){const o=new THREE.Mesh(geo,m);o.position.set(x,y,z);o.castShadow=true;o.receiveShadow=true;parent.add(o);return o;}
-function cube(x,y,z,w,h,d,c,parent=scene){const o=mesh(new THREE.BoxGeometry(w,h,d),mat(c),x,y,z,parent);return o;}
-function ball(x,y,z,r,c,parent=scene,squash=1){const o=mesh(new THREE.SphereGeometry(r,12,8),mat(c),x,y,z,parent);o.scale.y=squash;return o;}
-function cyl(x,y,z,r,h,c,parent=scene,r2=r){return mesh(new THREE.CylinderGeometry(r2,r,h,12),mat(c,.15,.4),x,y,z,parent);}
-function tube(points,r,c,parent=scene){return mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(points.map(a=>new THREE.Vector3(...a))),16,r,6,false),mat(c,.25,.32),0,0,0,parent);}
-function torus(x,y,z,r,t,c,parent=scene){const o=mesh(new THREE.TorusGeometry(r,t,6,24),mat(c,.15,.3),x,y,z,parent);o.rotation.x=-Math.PI/2;return o;}
+function cube(x,y,z,w,h,d,c,parent=scene){const o=mesh(h<.27&&w>1&&d>1?new THREE.BoxGeometry(w,h,d):detailedBox(w,h,d),mat(c),x,y,z,parent);return o;}
+function ball(x,y,z,r,c,parent=scene,squash=1){const o=mesh(new THREE.SphereGeometry(r,32,20),mat(c),x,y,z,parent);o.scale.y=squash;return o;}
+function cyl(x,y,z,r,h,c,parent=scene,r2=r){return mesh(new THREE.CylinderGeometry(r2,r,h,24),mat(c,.15,.4),x,y,z,parent);}
+function tube(points,r,c,parent=scene){return mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(points.map(a=>new THREE.Vector3(...a))),28,r,10,false),mat(c,.25,.32),0,0,0,parent);}
+function torus(x,y,z,r,t,c,parent=scene){const o=mesh(new THREE.TorusGeometry(r,t,10,40),mat(c,.15,.3),x,y,z,parent);o.rotation.x=-Math.PI/2;return o;}
 function glow(c){return new THREE.MeshStandardMaterial({color:c,emissive:c,emissiveIntensity:2,roughness:.3});}
 function crystal(x,z,h,c){const o=mesh(new THREE.CylinderGeometry(0,.25,h,5),mat(c,.25,.18),x,h/2,z);o.rotation.z=.2;mesh(new THREE.ConeGeometry(.25,.4,5),glow(c),x,h+.12,z);}
 function slime(x,z,r,c,boss=false){const g=new THREE.Group();g.position.set(x,0,z);scene.add(g);
  const material=new THREE.MeshPhysicalMaterial({color:c,roughness:.13,metalness:.02,clearcoat:1,clearcoatRoughness:.08,transmission:0,thickness:r*1.4,ior:1.36});
- const body=mesh(new THREE.SphereGeometry(r,24,16),material,0,r*.62,0,g);body.scale.set(1,.79,.91);
+ const body=mesh(new THREE.SphereGeometry(r,32,20),material,0,r*.62,0,g);body.scale.set(1,.79,.91);
  const core=ball(0,r*.65,.15,r*.48,c,g,.8);core.material=glow(c);
  for(let i=0;i<7;i++){const a=rand()*6.28;ball(Math.cos(a)*r*.62,r*(.35+rand()*.7),Math.sin(a)*r*.5,r*.055,0xdbfff0,g);}
  const face=new THREE.Group();g.add(face);face.rotation.y=.48;
@@ -101,10 +102,10 @@ if(theme===0){
  for(const dx of [-2,2])for(const dz of [-2,2])beam([gx+dx,.4,gz+dz],[gx+dx,3,gz+dz],.07,0xe9e3c8);
  for(let j=0;j<5;j++){const zz=gz-2+j;beam([gx-2,3,zz],[gx,4,zz],.06,0xdce1bf);beam([gx,4,zz],[gx+2,3,zz],.06,0xdce1bf);beam([gx-2,1.5,zz],[gx+2,1.5,zz],.035,0xd9ddbd);}
  beam([gx,4,gz-2.2],[gx,4,gz+2.2],.08,0xe9e3c8);
- for(const dx of [-1,1]){const pane=mesh(new THREE.BoxGeometry(2.25,.025,4.4),glass,gx+dx,3.5,gz);pane.rotation.z=-dx*.46;}
+ for(const dx of [-1,1]){const pane=mesh(detailedBox(2.25,.025,4.4),glass,gx+dx,3.5,gz);pane.rotation.z=-dx*.46;}
  for(const dx of [-1.1,1.1]){cube(gx+dx,.9,gz,1,.15,3.8,0xc3bb95);for(let j=0;j<6;j++){cyl(gx+dx,1.18,gz-1.6+j*.65,.22,.4,0xb4947c);for(let k=0;k<4;k++){const a=k*1.57;const leaf=ball(gx+dx+Math.cos(a)*.18,1.5,gz-1.6+j*.65+Math.sin(a)*.18,.22,0x79ae8c,scene,.35);leaf.rotation.z=.5;}}}
  // Raised water garden, pump, bridge planks, lily pads.
- cube(-5,.2,4,4.2,.4,3.4,0xa4b3a0);const water=mesh(new THREE.BoxGeometry(3.7,.07,2.9),new THREE.MeshPhysicalMaterial({color:0x60b5b1,metalness:.25,roughness:.12,clearcoat:1}),-5,.43,4);
+ cube(-5,.2,4,4.2,.4,3.4,0xa4b3a0);const water=mesh(detailedBox(3.7,.07,2.9),new THREE.MeshPhysicalMaterial({color:0x60b5b1,metalness:.25,roughness:.12,clearcoat:1}),-5,.43,4);
  for(let j=0;j<8;j++){const xx=-6.5+rand()*3,zz=3+rand()*2;const pad=cyl(xx,.49,zz,.22,.03,0x8bb987);if(j%3===0)ball(xx,.61,zz,.13,0xf3c7c6);}
  for(let j=0;j<7;j++)cube(-5,.65,2.4+j*.5,1.1,.13,.43,0xc2af88);railing(-5.65,2.4,3,false);
  for(const [x,z] of [[-3,8],[5,6]]){crate(x,z,0x9cb79c);crate(x+.9,z+.2,0xb4b798);lamp(x-.7,z+.4);}
@@ -116,7 +117,7 @@ if(theme===0){
  for(let j=0;j<10;j++)ball(-7+j*.44,3,-3.45,.22,0xffe9d2,scene,.7);
  cube(-5,.6,-2.7,3.5,1.2,.7,0xb2849b);cube(-5,1.2,-2.7,3.7,.14,.85,0xffe9cc);
  for(let j=0;j<7;j++){ball(-6.4+j*.45,1.4,-2.7,.19,[0xffc1ce,0xd6b5db,0xf1d29c][j%3]);}
- const caseGlass=mesh(new THREE.BoxGeometry(3.6,.65,.8),new THREE.MeshPhysicalMaterial({color:0xd7ffff,transparent:true,opacity:.2,roughness:.1}),-5,1.62,-2.7);
+ const caseGlass=mesh(detailedBox(3.6,.65,.8),new THREE.MeshPhysicalMaterial({color:0xd7ffff,transparent:true,opacity:.2,roughness:.1}),-5,1.62,-2.7);
  // Chocolate vat with riveted bands, valve wheel and overhead discharge.
  cyl(5,1.2,3,1.45,2.2,0xd1b99a);cyl(5,2.35,3,1.35,.08,0x725048);for(const y of [.4,1.1,2.1])torus(5,y,3,1.47,.08,0x8b92a0);
  for(let j=0;j<12;j++){const a=j*Math.PI/6;ball(5+Math.cos(a)*1.48,1.2,3+Math.sin(a)*1.48,.055,0xf5dabc);}
