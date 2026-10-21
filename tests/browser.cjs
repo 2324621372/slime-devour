@@ -14,7 +14,8 @@ try{
  await page.waitForFunction(()=>window.slimeGame?.snapshot().frame>1,{timeout:60000});
  const get=()=>page.evaluate(()=>window.slimeGame.snapshot());
  let a=await get();assert.equal(a.level,1);assert.equal(a.paused,false);assert.ok(a.entities>=24);assert.equal(await page.locator('#panel').isVisible(),false);assert.ok(a.drawCalls<400,`Draw calls: ${a.drawCalls}`);
- assert.ok(a.visualRadius<.5,'Starts physically small');assert.equal(a.stage,0);assert.ok(a.prey.every(e=>['dust','sugar'].includes(e.kind)));
+ assert.ok(a.visualRadius<.5,'Starts physically small');assert.equal(a.stage,0);assert.equal(new Set(a.prey.map(e=>e.stage)).size,6,'All six scales already exist');assert.ok(a.prey.every(e=>e.scale===e.radius));
+ const initialSizes=new Map(a.prey.map(e=>[e.id,e.scale]));
  const initialCamera=a.camera;
  await page.screenshot({path:'test-results/mobile-start.png'});
  // Real browser touch events, not clicks or a debug movement API.
@@ -34,6 +35,8 @@ try{
   await page.keyboard.down(key);await page.waitForTimeout(110);await page.keyboard.up(key);
  }
  b=await get();assert.ok(b.eaten>0,'Actual movement results in swallowing prey');assert.ok(b.radius>.45);assert.ok(b.score>0);await page.waitForTimeout(800);b=await get();assert.ok(b.camera.distance>initialCamera.distance,'Camera pulls back after real growth');
+ for(const e of b.prey)if(initialSizes.has(e.id))assert.equal(e.scale,initialSizes.get(e.id),'Existing prey never resizes');
+ assert.ok(b.spawnChecks.length>0);assert.ok(b.spawnChecks.every(e=>e.offscreen),'Replacements spawn completely outside camera');
  await page.locator('#mode').tap();assert.equal((await get()).mode,'endless');assert.equal((await get()).radius,.3);await page.locator('#restart').tap();assert.equal((await get()).eaten,0);
  await page.locator('#sound').tap();assert.equal((await get()).saved.muted,false);
  await page.reload();await page.waitForFunction(()=>window.slimeGame?.snapshot().frame>1);assert.equal((await get()).saved.muted,false);

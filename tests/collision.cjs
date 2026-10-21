@@ -7,7 +7,7 @@ const assert=require('node:assert/strict');
 (async()=>{
  // Bundle a deterministic contact fixture into a temporary test page only.
  const source=await fs.readFile('src/app.js','utf8');
- const fixture=`start(1,'level');for(const e of [...entities])removeEntity(e,false);makePrey();const obstacle=entities[0];obstacle.radius=.65;obstacle.x=-.5;obstacle.z=2.13;obstacle.kind='cap';placeEntity(obstacle);requestAnimationFrame(animate);`;
+ const fixture=`start(1,'level');for(const e of [...entities])removeEntity(e,false);makePrey(true,{kind:'cap',radius:.65,preyStage:0},{x:-.5,z:2.13});requestAnimationFrame(animate);`;
  const result=await build({stdin:{contents:source.replace("start(1,'level');requestAnimationFrame(animate);",fixture),resolveDir:path.resolve('src'),loader:'js'},bundle:true,write:false,format:'iife'});
  const html=(await fs.readFile('public/index.html','utf8')).replace(/<script>[\s\S]*?<\/script>/,()=>`<script>${result.outputFiles[0].text.replace(/<\/script/gi,'<\\/script')}</script>`);
  const target=path.resolve('test-results/collision-fixture.html');await fs.writeFile(target,html);

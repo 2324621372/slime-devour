@@ -8,6 +8,7 @@ const assert=require('node:assert/strict');
   const response=await page.goto('https://2324621372.github.io/slime-devour/',{waitUntil:'load',timeout:60000});
   assert.equal(response.status(),200);await page.waitForFunction(()=>window.slimeGame?.snapshot().frame>2,null,{timeout:60000});
   const s=await page.evaluate(()=>window.slimeGame.snapshot());assert.equal(s.level,1);assert.equal(s.mode,'level');assert.equal(s.paused,false);assert.equal(await page.locator('#panel').isVisible(),false);
+  assert.equal(new Set(s.prey.map(e=>e.stage)).size,6);assert.ok(s.prey.every(e=>e.scale===e.radius));assert.ok(Array.isArray(s.spawnChecks));
   await page.locator('#mode').tap();assert.equal(await page.evaluate(()=>window.slimeGame.snapshot().mode),'endless');
   await page.screenshot({path:'test-results/live-mobile.png'});
   assert.deepEqual(errors,[]);assert.equal(requests.filter(u=>!u.endsWith('/slime-devour/')).length,0);

@@ -8,9 +8,9 @@ export const STAGES = [
 ];
 export const stageFor = radius => STAGES.reduce((found,s,i)=>radius>=s.min?i:found,0);
 // Continuous reference scale avoids a visual jump at every named stage boundary.
-export const renderReference = radius => 1 + radius/3;
-export const visibleRadius = radius => radius/renderReference(radius);
-export const cameraDistance = radius => 13 + 10*Math.sqrt(visibleRadius(radius));
+export const renderReference = () => 1;
+export const visibleRadius = radius => radius;
+export const cameraDistance = radius => 13 + radius*3.4;
 export const canEat = (player, prey) => prey <= player * .95;
 export const grow = (r, prey, absorb=.85) => Math.cbrt(r**3 + prey**3 * absorb);
 export const multiplier = combo => 1 + Math.min(combo,50)*.08;

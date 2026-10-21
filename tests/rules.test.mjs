@@ -29,7 +29,13 @@ test('six growth tiers use exact boundaries and continuous camera scaling',()=>{
   assert.ok(Math.abs(cameraDistance(r)-cameraDistance(r-.00001))<.001);
  }
  let last=0,distance=0;for(const r of [.3,.45,1,3,8,20,50,100]){assert.ok(visibleRadius(r)>last);assert.ok(cameraDistance(r)>distance);last=visibleRadius(r);distance=cameraDistance(r);}
- assert.ok(visibleRadius(.3)<.3);assert.ok(visibleRadius(50)>2.8);
+ assert.equal(visibleRadius(.3),.3);assert.equal(visibleRadius(50),50);
+});
+test('circle to box contact uses closest face, preserves tangent and clears penetration',()=>{
+ const p={x:1.2,z:.2,r:.5,vx:-3,vz:2,invMass:1},box={x:0,z:0,hx:1,hz:2,r:0,invMass:0};
+ resolveContact(p,box,0);assert.equal(p.x,1.5);assert.equal(p.vx,0);assert.equal(p.vz,2);assert.equal(resolveContact(p,box),false);
+ const corner={x:1.45,z:2.45,r:.5,invMass:1};assert.equal(resolveContact(corner,box),false);
+ const inside={x:0,z:0,r:.5,invMass:1};resolveContact(inside,box);assert.equal(Math.abs(inside.x),1.5);
 });
 test('every growth tier has two valid distinct detailed prey models with shared geometry',()=>{
  for(const stage of STAGES)for(const kind of stage.prey){const model=preyModel(kind);assert.ok(model.geometry.attributes.position.count>100,kind);for(const n of model.geometry.attributes.position.array)assert.ok(Number.isFinite(n),kind);assert.equal(preyModel(kind).geometry,model.geometry);assert.ok(model.geometry.attributes.color);}

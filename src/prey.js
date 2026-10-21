@@ -49,7 +49,10 @@ function build(kind){
  g.traverse(o=>{if(o.isMesh){const geo=o.geometry.clone().applyMatrix4(o.matrixWorld);geo.scale(unit,unit,unit);geo.translate(0,-bounds.min.y*unit,0);const color=o.material.color;const flat=geo.index?geo.toNonIndexed():geo;const array=new Float32Array(flat.attributes.position.count*3);for(let i=0;i<array.length;i+=3){array[i]=color.r;array[i+1]=color.g;array[i+2]=color.b;}flat.setAttribute('color',new THREE.BufferAttribute(array,3));parts.push(flat);o.geometry.dispose();}});
  const geometry=mergeGeometries(parts,false);parts.forEach(p=>p.dispose());geometry.userData.shared=true;
  const m=new THREE.MeshStandardMaterial({vertexColors:true,roughness:.42,metalness:.03});
- return {geometry,material:m,footprint:Math.max(size.x,size.z)*unit*.5};
+ const round=['dust','sugar','bug','cap','fruit','pet','streetlamp'].includes(kind);
+ // Ground silhouettes exclude projecting lamps and high balconies.
+ const footprint=kind==='streetlamp'?{r:.28*unit,ox:0,oz:0}:round?{r:Math.max(size.x,size.z)*unit*.5,ox:(bounds.min.x+bounds.max.x)*unit*.5,oz:(bounds.min.z+bounds.max.z)*unit*.5}:{hx:size.x*unit*.5,hz:size.z*unit*.5,ox:(bounds.min.x+bounds.max.x)*unit*.5,oz:(bounds.min.z+bounds.max.z)*unit*.5};
+ return {geometry,material:m,footprint};
 }
 export function preyModel(kind){if(!templates.has(kind))templates.set(kind,build(kind));const t=templates.get(kind);const o=new THREE.Mesh(t.geometry,t.material);o.castShadow=true;o.receiveShadow=true;o.userData.kind=kind;o.userData.footprint=t.footprint;return o;}
 export function preyKind(stage,index=Math.random()){const list=STAGES[stage].prey;return list[Math.floor(index*list.length)%list.length];}

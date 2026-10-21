@@ -1,10 +1,11 @@
 import * as THREE from 'three';
 import {createWorld} from './world.js';
 import levels from './levels.json';
-import {canEat,grow,multiplier,scoreFor,objective,starsFor,STAGES,stageFor,renderReference,visibleRadius,cameraDistance} from './rules.js';
+import {canEat,grow,multiplier,scoreFor,objective,starsFor,STAGES,stageFor,visibleRadius,cameraDistance} from './rules.js';
 import {jelly,spikeBall,bee,material} from './models.js';
 import {preyModel,preyKind,PREY_NAMES} from './prey.js';
 import {resolveContact,anchored} from './physics.js';
+import {CATALOG,MAP_EDGE,catalogItem} from './population.js';
 
 const $=id=>document.getElementById(id),clamp=THREE.MathUtils.clamp;
 const SAVE_KEY='slime-devour-v1';
@@ -15,7 +16,7 @@ let renderer,world,scene,camera,dynamic,player,ring,boss,entities=[],effects=[],
 let level=levels[0],mode='level',state,paused=false,ended=false,theme=-1,frame=0,last=0,hudClock=0,spawnClock=0,toastTimer,stage=0,cityWaveAt=0,qualityLow=false;
 let audio,master;const input={x:0,y:0,active:false,id:null,startX:0,startY:0},keys=new Set();
 const playerPos=new THREE.Vector2(0,3),velocity=new THREE.Vector2(),camTarget=new THREE.Vector3();
-const pooled=[];let dpr=1,frameCost=0,samples=0;
+let nextEntityId=0,spawnSequence=0;const spawnChecks=[];const pooled=[];let dpr=1,frameCost=0,samples=0;
 function toast(text){$('toast').textContent=text;$('toast').classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').classList.remove('show'),2300);}
 function unlockAudio(){if(save.muted)return;try{if(!audio){audio=new (window.AudioContext||window.webkitAudioContext)();master=audio.createGain();master.gain.value=.07;master.connect(audio.destination);}audio.resume();}catch{}}
 function sound(kind=0){if(!audio||save.muted||audio.state!=='running')return;const o=audio.createOscillator(),g=audio.createGain();o.type=kind===2?'triangle':'sine';o.frequency.setValueAtTime(kind===1?150:kind===2?650:280+(state?.combo||0)*23,audio.currentTime);o.frequency.exponentialRampToValueAtTime(kind===1?50:800,audio.currentTime+.12);g.gain.setValueAtTime(.8,audio.currentTime);g.gain.exponentialRampToValueAtTime(.001,audio.currentTime+.18);o.connect(g);g.connect(master);o.start();o.stop(audio.currentTime+.2);}
@@ -38,53 +39,61 @@ function loadWorld(nextTheme){
  // Runtime models share geometry/materials and must not be disposed with scenery.
  if(dynamic)scene.remove(dynamic);
  disposeWorld();world=createWorld(nextTheme);scene=world.scene;camera=world.camera;theme=nextTheme;
- scene.fog.near=35;scene.fog.far=80;
+ scene.fog.near=1800;scene.fog.far=3200;camera.far=5000;camera.near=.05;camera.updateProjectionMatrix();
+ const terrain=new THREE.Mesh(new THREE.PlaneGeometry(MAP_EDGE*2+400,MAP_EDGE*2+400),new THREE.MeshStandardMaterial({color:world.palette.ground||0x8eb796,roughness:.85}));terrain.rotation.x=-Math.PI/2;terrain.position.y=-.08;scene.add(terrain);
  dynamic=new THREE.Group();dynamic.userData.dynamic=true;scene.add(dynamic);
  camera.position.set(15.5,23,26);camera.lookAt(0,0,-1);resize();
  scene.traverse(o=>{if(o.isLight&&o.shadow)o.castShadow=!qualityLow;});
 }
 function displayRadius(){return visibleRadius(state.radius);}
-function screenScale(){return renderReference(state.radius);}
-function entityPosition(){let x,z;for(let i=0;i<30;i++){x=(Math.random()-.5)*17;z=(Math.random()-.5)*21;if(Math.hypot(x-playerPos.x,z-playerPos.y)>2.3&&!blocked(x,z,.35))return {x,z};}return {x:clamp(playerPos.x+3,-8,8),z:clamp(playerPos.y-3,-10,10)};}
+function outsideView(x,z,r=1){camera.updateMatrixWorld();const frustum=new THREE.Frustum().setFromProjectionMatrix(new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix,camera.matrixWorldInverse));return !frustum.intersectsSphere(new THREE.Sphere(new THREE.Vector3(x,r*.7,z),r*2));}
+function entityPosition(r=.5,offscreen=true){for(let i=0;i<180;i++){const angle=Math.random()*Math.PI*2,range=offscreen?cameraDistance(state.radius)*(.9+Math.random()*2)+r*3:5+Math.random()*30;const x=playerPos.x+Math.cos(angle)*range,z=playerPos.y+Math.sin(angle)*range;if(Math.abs(x)+r>MAP_EDGE||Math.abs(z)+r>MAP_EDGE||blocked(x,z,r))continue;if(offscreen&&!outsideView(x,z,r))continue;if(entities.some(e=>Math.hypot(x-e.x,z-e.z)<r*1.6+(e.visual||e.radius)*1.6))continue;return {x,z};}return null;}
 function blocked(x,z,r=.4){
  // Collision footprints correspond to the large third-version buildings.
  const rects=theme===0?[[-7.4,-2.6,-7,-2.8],[3,7,-2.5,2.5],[-7.2,-5.8,2.7,5.5]]:theme===1?[[-7.3,-2.7,-7,-3.1],[3.8,8.2,-9,-5.3],[3.2,6.8,-5.6,1.5],[3.5,6.5,1.5,4.5],[-6.5,-3.5,3.1,4.9],[-6.5,-3.5,7.1,8.9]]:[[-6.8,-5.3,2,4.2],[5.3,6.8,2,4.2],[-4.8,-3.2,-8,-6],[5.2,6.8,-8,-6]];
  return rects.some(([a,b,c,d])=>x>a-r*.6&&x<b+r*.6&&z>c-r*.6&&z<d+r*.6);
 }
-function makePrey(initial=false,chain=false){
- if(entities.filter(e=>!e.threat).length>=Math.min(60,level.maxPrey))return;
- let radius;
- if(initial)radius=THREE.MathUtils.lerp(level.preyMin,Math.min(level.preyMax,state.radius*.9),Math.random());
- else radius=state.radius*(.5+Math.random()*(Math.random()<.18?1.15:.44));
- const pos=entityPosition();
- if(chain){const a=Math.random()*Math.PI*2,dist=1.5+Math.random()*1.5;pos.x=clamp(playerPos.x+Math.cos(a)*dist,-8.8,8.8);pos.z=clamp(playerPos.y+Math.sin(a)*dist,-10.5,10.5);if(blocked(pos.x,pos.z))return;}
- const preyStage=stageFor(radius),kind=preyKind(preyStage),pooledIndex=pooled.findIndex(m=>m.userData.kind===kind),mesh=pooledIndex<0?preyModel(kind):pooled.splice(pooledIndex,1)[0];dynamic.add(mesh);
- const e={mesh,radius,kind,preyStage,x:pos.x,z:pos.z,phase:Math.random()*6.28,threat:false,vx:(Math.random()-.5)*.35,vz:(Math.random()-.5)*.35,age:0};entities.push(e);placeEntity(e);
+function makePrey(initial=false,descriptor=null,pos=null){
+ if(entities.filter(e=>!e.threat).length>=230)return;
+ const item=descriptor||catalogItem(spawnSequence++,Math.floor(spawnSequence/12));
+ const {radius,kind,preyStage}=item;pos=pos||entityPosition(radius,!initial);if(!pos)return;
+ const pooledIndex=pooled.findIndex(m=>m.userData.kind===kind),mesh=pooledIndex<0?preyModel(kind):pooled.splice(pooledIndex,1)[0];dynamic.add(mesh);mesh.rotation.set(0,0,0);
+ const e={id:++nextEntityId,mesh,radius,kind,preyStage,x:pos.x,z:pos.z,phase:Math.random()*6.28,threat:false,vx:0,vz:0,age:0};entities.push(e);placeEntity(e);
+ if(!initial){spawnChecks.push({id:e.id,offscreen:outsideView(e.x,e.z,e.radius),radius:e.radius});if(spawnChecks.length>100)spawnChecks.shift();}return e;
 }
-function makeThreat(){if(level.id===1&&mode==='level')return;const pos=entityPosition();let kind=level.id===5?'bee':level.id===6?'ball':'spike';const mesh=kind==='bee'?bee():kind==='ball'?jelly(0xeb849f):spikeBall();dynamic.add(mesh);const e={mesh,radius:state.radius*(1.35+Math.random()*.8),x:pos.x,z:pos.z,phase:Math.random()*6.28,threat:true,kind,age:0,vx:0,vz:0};entities.push(e);placeEntity(e);}
-function placeEntity(e){const r=e.threat?clamp(e.radius/screenScale(),.7,1.4):clamp(e.radius/screenScale(),.035,5);e.visual=r;e.mesh.position.set(e.x,.12,e.z);e.mesh.scale.setScalar(r);}
-function contactBody(e){return {x:e.x,z:e.z,r:e.visual*(e.mesh.userData.footprint||1)*.72,vx:e.pushX||0,vz:e.pushZ||0,invMass:anchored(e.kind)?0:1/Math.max(.08,e.visual**3)};}
-function applyBody(e,b){
- const r=Math.min(.9,b.r);const x=clamp(b.x,-8.7+r,8.7-r),z=clamp(b.z,-10.4+r,10.4-r);
- if(!blocked(x,e.z,r))e.x=x;else b.vx=0;
- if(!blocked(e.x,z,r))e.z=z;else b.vz=0;
- e.pushX=b.vx;e.pushZ=b.vz;
+function populate(){
+ // All scales exist from the first frame. Larger props occupy outer districts.
+ spawnSequence=0;spawnChecks.length=0;
+ for(let tier=0;tier<6;tier++)for(let i=0;i<24;i++){
+  const item=catalogItem(tier*2+i%2,Math.floor(i/2));let pos=null;
+  for(let attempt=0;attempt<180;attempt++){const angle=(i/24)*Math.PI*2+attempt*.63,range=[5,18,48,120,280,510][tier]+Math.random()*[11,14,25,55,95,70][tier];const x=Math.cos(angle)*range,z=3+Math.sin(angle)*range,r=item.radius;
+   if(Math.abs(x)+r>MAP_EDGE||Math.abs(z)+r>MAP_EDGE||blocked(x,z,r)||entities.some(e=>Math.hypot(x-e.x,z-e.z)<r*1.65+e.radius*1.65))continue;pos={x,z};break;}
+  if(pos)makePrey(true,item,pos);
+ }
+ // Small food is present at spawn even in late-level starts, with several fixed scales.
+ for(let i=0;i<24;i++){const tier=i%Math.min(4,stage+1),item=catalogItem(tier*2+i%2,Math.floor(i/4));const pos=entityPosition(item.radius,false);if(pos)makePrey(true,item,pos);}
 }
+function makeThreat(){if(level.id===1&&mode==='level')return;const pos=entityPosition(1,true);if(!pos)return;let kind=level.id===5?'bee':level.id===6?'ball':'spike';const mesh=kind==='bee'?bee():kind==='ball'?jelly(0xeb849f):spikeBall();dynamic.add(mesh);const e={mesh,radius:1.2,x:pos.x,z:pos.z,phase:Math.random()*6.28,threat:true,kind,age:0,vx:0,vz:0};entities.push(e);placeEntity(e);}
+function placeEntity(e){e.visual=e.radius;e.mesh.position.set(e.x,.12,e.z);e.mesh.scale.setScalar(e.radius);}
+function contactBody(e){const f=e.mesh.userData.footprint||{r:1},scale=e.radius;return {x:e.x+(f.ox||0)*scale,z:e.z+(f.oz||0)*scale,r:(f.r||Math.hypot(f.hx,f.hz))*scale,hx:f.hx?f.hx*scale:undefined,hz:f.hz?f.hz*scale:undefined,vx:e.pushX||0,vz:e.pushZ||0,invMass:anchored(e.kind)?0:1/Math.max(.08,e.radius**3)};}
+function applyBody(e,b){const f=e.mesh.userData.footprint||{};e.x=clamp(b.x-(f.ox||0)*e.radius,-MAP_EDGE+e.radius,MAP_EDGE-e.radius);e.z=clamp(b.z-(f.oz||0)*e.radius,-MAP_EDGE+e.radius,MAP_EDGE-e.radius);e.pushX=b.vx;e.pushZ=b.vz;}
 function collideEntities(dt){
  const solid=entities.filter(e=>!e.threat);
- // Two passes stabilize chains of touching objects without a physics dependency.
- for(let pass=0;pass<2;pass++)for(let i=0;i<solid.length;i++)for(let j=i+1;j<solid.length;j++){
-  const a=solid[i],b=solid[j],ab=contactBody(a),bb=contactBody(b),hit=resolveContact(ab,bb);
-  if(hit){applyBody(a,ab);applyBody(b,bb);a.impact=Math.max(a.impact||0,.08);b.impact=Math.max(b.impact||0,.08);}
- }
- for(const e of solid){
-  const b=contactBody(e);b.x+=b.vx*dt;b.z+=b.vz*dt;b.vx*=Math.exp(-dt*5);b.vz*=Math.exp(-dt*5);applyBody(e,b);
-  if(!canEat(state.radius,e.radius)){
-   const p={x:playerPos.x,z:playerPos.y,r:displayRadius()*.8,vx:velocity.x,vz:velocity.y,invMass:1/Math.max(.08,displayRadius()**3)},body=contactBody(e),hit=resolveContact(p,body,.12);
-   if(hit){const px=clamp(p.x,-8.9,8.9),pz=clamp(p.z,-10.7,10.7);if(!blocked(px,playerPos.y,displayRadius()))playerPos.x=px;if(!blocked(playerPos.x,pz,displayRadius()))playerPos.y=pz;velocity.set(p.vx,p.vz);applyBody(e,body);player.userData.bounce=.18;e.impact=.18;state.contacts++;}
+ for(const e of solid){const b=contactBody(e);if(!anchored(e.kind)){b.x+=b.vx*dt;b.z+=b.vz*dt;b.vx*=Math.exp(-dt*6);b.vz*=Math.exp(-dt*6);applyBody(e,b);}}
+ for(let pass=0;pass<3;pass++){
+  for(let i=0;i<solid.length;i++)for(let j=i+1;j<solid.length;j++){const a=solid[i],b=solid[j];if(Math.abs(a.x-b.x)>a.radius*2+b.radius*2||Math.abs(a.z-b.z)>a.radius*2+b.radius*2)continue;const ab=contactBody(a),bb=contactBody(b);if(resolveContact(ab,bb,0)){applyBody(a,ab);applyBody(b,bb);}}
+  for(const e of solid){const body=contactBody(e),p={x:playerPos.x,z:playerPos.y,r:displayRadius()*.94,vx:velocity.x,vz:velocity.y,invMass:1/Math.max(.08,state.radius**3)};const hit=resolveContact(p,body,0);if(!hit)continue;
+   if(canEat(state.radius,e.radius)){eat(e);solid.splice(solid.indexOf(e),1);continue;}
+   playerPos.set(p.x,p.z);velocity.set(p.vx,p.vz);applyBody(e,body);state.contacts++;player.userData.bounce=.12;
   }
-  placeEntity(e);e.impact=Math.max(0,(e.impact||0)-dt);const wobble=Math.sin(e.impact*40)*e.impact;e.mesh.rotation.z=wobble*.35;e.mesh.rotation.x=-wobble*.25;
+  resolveScenery();
  }
+ for(const e of solid)placeEntity(e);
+}
+function resolveScenery(){
+ const rects=theme===0?[[-7.4,-2.6,-7,-2.8],[3,7,-2.5,2.5],[-7.2,-5.8,2.7,5.5]]:theme===1?[[-7.3,-2.7,-7,-3.1],[3.8,8.2,-9,-5.3],[3.2,6.8,-5.6,1.5],[3.5,6.5,1.5,4.5],[-6.5,-3.5,3.1,4.9],[-6.5,-3.5,7.1,8.9]]:[[-6.8,-5.3,2,4.2],[5.3,6.8,2,4.2],[-4.8,-3.2,-8,-6],[5.2,6.8,-8,-6]];
+ for(const [a,b,c,d] of rects){const p={x:playerPos.x,z:playerPos.y,r:displayRadius()*.94,vx:velocity.x,vz:velocity.y,invMass:1};if(resolveContact(p,{x:(a+b)/2,z:(c+d)/2,hx:(b-a)/2,hz:(d-c)/2,r:0,invMass:0},0)){playerPos.set(p.x,p.z);velocity.set(p.vx,p.vz);}}
+ playerPos.x=clamp(playerPos.x,-MAP_EDGE+displayRadius(),MAP_EDGE-displayRadius());playerPos.y=clamp(playerPos.y,-MAP_EDGE+displayRadius(),MAP_EDGE-displayRadius());
 }
 function clearDynamic(){
  pooled.forEach(o=>dynamic.add(o));
@@ -100,9 +109,7 @@ function start(id=1,newMode=mode){
  if(dynamic)clearDynamic();loadWorld(nextTheme);playerPos.set(0,3);velocity.set(0,0);
  player=jelly(world.palette.main);player.rotation.y=.5;dynamic.add(player);
  ring=new THREE.Mesh(new THREE.TorusGeometry(1.28,.018,5,48),new THREE.MeshBasicMaterial({color:0xc5ffe1,transparent:true,opacity:.8}));ring.rotation.x=-Math.PI/2;dynamic.add(ring);
- for(let i=0;i<level.initialPrey;i++)makePrey(true);
- // A short nearby chain makes the first touch immediately rewarding.
- for(let i=0;i<5;i++)makePrey(true,true);
+ updatePlayer(0);populate();
  for(let i=0;i<level.initialThreats;i++)makeThreat();
  if(mode==='level'&&[4,10,12].includes(level.id))spawnBoss();
  if(level.id===7&&mode==='level')for(const x of [-3,3]){const beam=new THREE.Mesh(new THREE.BoxGeometry(.08,1.6,7),new THREE.MeshBasicMaterial({color:0xff6479,transparent:true,opacity:.65}));beam.position.set(x,.8,0);dynamic.add(beam);hazards.push({mesh:beam,x});}
@@ -119,8 +126,6 @@ function eat(e){
  floater(points,perfect,e.x,e.z);burst(e.x,e.z,perfect?0xffdb8e:0xc6ffe1,qualityLow?5:10);sound();if(perfect&&navigator.vibrate)navigator.vibrate(12);
  removeEntity(e);player.userData.bounce=.25;
  if(state.combo%10===0)toast(`${state.combo} 连击！倍率 ×${multiplier(state.combo).toFixed(2)}`);
- // Replenish near the route, keeping combo challenges achievable.
- for(let i=0;i<(level.id===8?3:2);i++)makePrey(false,true);
  const next=stageFor(state.radius);if(next>stage){stage=next;toast(`进入【${STAGES[stage].name}】阶段 · ${STAGES[stage].description}`);state.score+=500*(stage+1);for(let i=0;i<2;i++)makeThreat();}
 }
 function damage(){if(state.invincible>0||ended)return;state.hp--;state.hits++;state.invincible=1.8;state.combo=0;sound(1);burst(playerPos.x,playerPos.y,0xff9eac,12);if(navigator.vibrate)navigator.vibrate(40);toast(level.id===7?'触碰激光，无伤挑战失败':'受击！远离红色威胁');if(state.hp<=0||level.id===7)finish(false);}
@@ -148,7 +153,7 @@ function updateBoss(dt){if(!boss||boss.hp<=0)return;const b=boss;b.phase+=dt;b.h
  b.mesh.position.set(b.x,.2,b.z);b.mesh.scale.setScalar(1.65+(b.total-b.hp)*.1);b.mesh.rotation.y=Math.atan2(dx,dz);b.mesh.userData.body.material=material(vulnerable?0xf6d28c:warning?0xff6579:level.id===12?0xa789df:0xee9567);
  b.ring.position.set(b.x,.24,b.z);b.ring.scale.setScalar(warning?1+(cycle-3.6)*.6:1);b.ring.material.color.setHex(vulnerable?0x9dffd7:0xff9877);b.ring.visible=!vulnerable;
  $('bosslabel').textContent=vulnerable?'虚弱！靠近碰撞反击':warning?'蓄力冲刺！快躲开':`${level.id===4?'面包屑王':level.id===12?'虚空吞噬者':'熔岩领主'} · 先躲攻击，再反击`;$('bossfill').style.width=`${b.hp/b.total*100}%`;
- if(dist<displayRadius()+1.5){if(vulnerable&&b.hitCooldown<=0){b.hp--;state.bossHP=b.hp;b.hitCooldown=2.6;state.score+=level.id===10?2600:1000;sound(2);burst(b.x,b.z,0xffd28c,18);toast('反击命中！');if(b.hp<=0){dynamic.remove(b.mesh);dynamic.remove(b.ring);$('bossbar').hidden=true;if(level.id===12)for(let i=0;i<8;i++)makePrey(false,true);}else if(level.id===10&&!b.split){b.split=true;for(let i=0;i<2;i++)makeThreat();}}else if(!vulnerable)damage();}
+ if(dist<displayRadius()+1.5){if(vulnerable&&b.hitCooldown<=0){b.hp--;state.bossHP=b.hp;b.hitCooldown=2.6;state.score+=level.id===10?2600:1000;sound(2);burst(b.x,b.z,0xffd28c,18);toast('反击命中！');if(b.hp<=0){dynamic.remove(b.mesh);dynamic.remove(b.ring);$('bossbar').hidden=true;if(level.id===12)for(let i=0;i<8;i++)makePrey();}else if(level.id===10&&!b.split){b.split=true;for(let i=0;i<2;i++)makeThreat();}}else if(!vulnerable)damage();}
  if(level.id===10&&cycle>2&&!b.waveDone){b.waveDone=true;const m=new THREE.Mesh(new THREE.TorusGeometry(.3,.045,5,64),new THREE.MeshBasicMaterial({color:0xffa06e,transparent:true}));m.rotation.x=-Math.PI/2;m.position.set(b.x,.3,b.z);dynamic.add(m);effects.push({m,life:2.4,max:2.4,wave:true,x:b.x,z:b.z});}
  if(level.id===12&&cycle<3.6&&dist<6){playerPos.x+=dx/dist*dt*.25;playerPos.y+=dz/dist*dt*.25;}
 }
@@ -158,18 +163,16 @@ function update(dt){
  const speed=(level.id===8?5.8:4.8)*level.speed*(1+Math.sqrt(state.radius)*.09);const targetX=(ix*.867+iy*.498)*speed,targetZ=(-ix*.498+iy*.867)*speed;
  const inertia=level.id===9?2.8:level.id===11?3.8:14;velocity.x=THREE.MathUtils.lerp(velocity.x,targetX,Math.min(1,dt*inertia));velocity.y=THREE.MathUtils.lerp(velocity.y,targetZ,Math.min(1,dt*inertia));
  if(level.id===3){velocity.x+=Math.sin(Math.floor(state.elapsed/8)*Math.PI/2)*dt*1.8;velocity.y+=Math.cos(state.elapsed*.3)*dt*.7;}
- let boundary=mode==='level'&&level.id===12?Math.max(6.4,10.5-state.elapsed*.025):10.7;const nx=clamp(playerPos.x+velocity.x*dt,-8.9,8.9),nz=clamp(playerPos.y+velocity.y*dt,-boundary,boundary);if(!blocked(nx,playerPos.y,displayRadius()))playerPos.x=nx;if(!blocked(playerPos.x,nz,displayRadius()))playerPos.y=nz;
+ const travel=Math.max(.025,displayRadius()*.4),steps=Math.min(64,Math.max(1,Math.ceil(velocity.length()*dt/travel)));
+ for(let step=0;step<steps;step++){playerPos.x+=velocity.x*dt/steps;playerPos.y+=velocity.y*dt/steps;collideEntities(dt/steps);}
  const pr=displayRadius();
  for(const e of [...entities]){
-  if(!e.threat&&e.radius<state.radius*.12){removeEntity(e);continue;}
   e.age+=dt;const dx=playerPos.x-e.x,dz=playerPos.y-e.z,dist=Math.hypot(dx,dz)||.001;
   if(e.threat){if(e.kind==='bee'){e.x+=dx/dist*dt*1.25;e.z+=dz/dist*dt*1.25;}else if(level.id===2){/* Fixed obstacles teach safe routes. */}else if(e.kind==='ball'){e.x+=Math.cos(e.phase)*dt*2.5;e.z+=Math.sin(e.phase)*dt*2.5;if(Math.abs(e.x)>8.5||Math.abs(e.z)>10)e.phase+=Math.PI;}else {e.x+=Math.cos(e.phase+state.elapsed*.45)*dt*.7;e.z+=Math.sin(e.phase+state.elapsed*.45)*dt*.7;}}
-  else{const moving=['bug','pet'].includes(e.kind);const flee=moving&&level.id>2&&dist<2.5&&state.radius>e.radius?-.3:0;const xx=e.x+((moving?e.vx:0)+dx/dist*flee)*dt,zz=e.z+((moving?e.vz:0)+dz/dist*flee)*dt;if(Math.abs(xx)<8.7&&!blocked(xx,e.z,.2))e.x=xx;else e.vx*=-1;if(Math.abs(zz)<10.4&&!blocked(e.x,zz,.2))e.z=zz;else e.vz*=-1;}
-  placeEntity(e);e.mesh.position.y=e.threat?.13+Math.sin(e.phase+state.elapsed*3)*.035:.12;e.mesh.rotation.y=.5+(['bug','pet'].includes(e.kind)?Math.sin(e.phase+state.elapsed)*.2:0);
+  placeEntity(e);e.mesh.position.y=e.threat?.13+Math.sin(e.phase+state.elapsed*3)*.035:.12;e.mesh.rotation.y=0;
   const edible=!e.threat&&canEat(state.radius,e.radius);e.mesh.userData.body?.material?.emissive.setHex(edible?0x092119:0x000000);
-  if(dist<pr*.67+e.visual*.65){if(edible)eat(e);else if(e.threat)damage();}
+  if(e.threat&&dist<pr*.94+e.visual*.8)damage();
  }
- collideEntities(dt);
  spawnClock+=dt;if(spawnClock>=Math.max(.45,level.spawnInterval*(mode==='endless'?Math.max(.35,1-stage*.1):1))){spawnClock=0;for(let i=0;i<3;i++)makePrey();if(entities.filter(e=>e.threat).length<(mode==='endless'?Math.min(8,2+stage):Math.min(level.maxThreats,level.initialThreats)))makeThreat();}
  for(const h of hazards){const active=state.elapsed%6>3;h.mesh.visible=active;if(active&&Math.abs(playerPos.x-h.x)<pr*.65+.1&&Math.abs(playerPos.y)<3.5)damage();}
  if(level.id===10&&Math.abs(playerPos.x)>7.8&&mode==='level')damage();
@@ -187,5 +190,5 @@ try{
  renderer.domElement.addEventListener('webglcontextlost',e=>{e.preventDefault();showPause();toast('图形上下文暂时中断，请刷新恢复');});
  loadWorld(0);applyQuality();start(1,'level');requestAnimationFrame(animate);
  // Read-only diagnostics help verify offline and mobile builds without altering play.
- Object.defineProperty(window,'slimeGame',{value:{snapshot:()=>({...state,mode,level:level.id,paused,ended,entities:entities.length,frame,drawCalls:renderer.info.render.calls,qualityLow,stage,stageName:STAGES[stage].name,visualRadius:displayRadius(),camera:{x:camera.position.x,y:camera.position.y,z:camera.position.z,distance:camera.position.distanceTo(camTarget),target:{x:camTarget.x,y:camTarget.y,z:camTarget.z},playerNDC:player.position.clone().add(new THREE.Vector3(0,displayRadius()*.45,0)).project(camera).toArray()},position:{x:playerPos.x,z:playerPos.y},prey:entities.filter(e=>!e.threat).map(e=>({x:e.x,z:e.z,radius:e.radius,kind:e.kind,name:PREY_NAMES[e.kind],stage:e.preyStage,edible:canEat(state.radius,e.radius)})),saved:JSON.parse(JSON.stringify(save))})}});
+ Object.defineProperty(window,'slimeGame',{value:{snapshot:()=>({...state,mode,level:level.id,paused,ended,entities:entities.length,frame,drawCalls:renderer.info.render.calls,qualityLow,stage,stageName:STAGES[stage].name,visualRadius:displayRadius(),camera:{x:camera.position.x,y:camera.position.y,z:camera.position.z,distance:camera.position.distanceTo(camTarget),target:{x:camTarget.x,y:camTarget.y,z:camTarget.z},playerNDC:player.position.clone().add(new THREE.Vector3(0,displayRadius()*.45,0)).project(camera).toArray()},position:{x:playerPos.x,z:playerPos.y},spawnChecks:[...spawnChecks],prey:entities.filter(e=>!e.threat).map(e=>({id:e.id,scale:e.mesh.scale.x,x:e.x,z:e.z,radius:e.radius,kind:e.kind,name:PREY_NAMES[e.kind],stage:e.preyStage,edible:canEat(state.radius,e.radius)})),saved:JSON.parse(JSON.stringify(save))})}});
 }catch(error){console.error(error);$('loading').hidden=true;$('error').hidden=false;$('error').textContent='无法启动 3D 画面。请使用支持 WebGL 2 的新版 Chrome、Edge 或 Safari，并开启浏览器硬件加速。';}
