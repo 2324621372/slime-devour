@@ -145,6 +145,15 @@ for(let i=0;i<90;i++){const x=(rand()-.5)*21,z=(rand()-.5)*25;if(Math.abs(x)<2.2
 
 // Bake thousands of stationary parts into material batches, preserving visible detail.
 scene.updateMatrixWorld(true);
+// Capture each authored part before batching; the merged render meshes lose footprints.
+const colliders=[];
+scene.traverse(o=>{
+ if(!o.isMesh)return;
+ const b=new THREE.Box3().setFromObject(o),s=b.getSize(new THREE.Vector3()),c=b.getCenter(new THREE.Vector3());
+ // Floors, paving, grass and tiny surface flecks are walkable.
+ if(b.max.y<.32||s.y<.16||b.min.y>2||s.x>22||s.z>27||Math.max(s.x,s.z)<.075)return;
+ colliders.push({x:c.x,z:c.z,hx:s.x*.5,hz:s.z*.5,r:0,invMass:0,minY:b.min.y,maxY:b.max.y});
+});
 const batches=new Map(), oldGeometries=new Set(), oldMaterials=new Set();
 scene.traverse(o=>{
  if(!o.isMesh)return;
@@ -164,5 +173,5 @@ for(const {material,geometries,transparent} of batches.values()){
  geometries.forEach(g=>g.dispose());
 }
 oldGeometries.forEach(g=>g.dispose());oldMaterials.forEach(m=>{if(!retained.has(m))m.dispose()});
-return {scene,camera,palette:p};
+return {scene,camera,palette:p,colliders};
 }

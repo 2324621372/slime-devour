@@ -13,5 +13,5 @@ export const CATALOG=[
  {kind:'building',stage:5,sizes:[50.5,66,85]},
  {kind:'tower',stage:5,sizes:[54,75,100]}
 ];
-export const MAP_EDGE=680;
+export const MAP_EDGE=1000;
 export function catalogItem(index,variant=0){const c=CATALOG[index%CATALOG.length];return {kind:c.kind,preyStage:c.stage,radius:c.sizes[variant%c.sizes.length]};}

@@ -24,8 +24,8 @@ export function jelly(color,boss=false){
   part(g,new THREE.OctahedronGeometry(.16,0),gem,0,.91,-.85,1,1.5,.5);
  }
  g.updateMatrixWorld(true);
- const batches=new Map();g.traverse(o=>{if(!o.isMesh||o===body)return;if(!batches.has(o.material))batches.set(o.material,[]);const geo=o.geometry.clone().applyMatrix4(o.matrixWorld);batches.get(o.material).push(geo);});
- g.clear();g.add(body);
+ const batches=new Map();g.traverse(o=>{if(!o.isMesh||o===body||o===mouth)return;if(!batches.has(o.material))batches.set(o.material,[]);const geo=o.geometry.clone().applyMatrix4(o.matrixWorld);batches.get(o.material).push(geo);});
+ g.clear();g.add(body,mouth);g.userData.mouth=mouth;
  for(const [m,geometries] of batches){const merged=mergeGeometries(geometries.map(geo=>geo.index?geo.toNonIndexed():geo),false);const o=new THREE.Mesh(merged,m);o.castShadow=true;g.add(o);geometries.forEach(geo=>geo.dispose());}
  return g;
 }

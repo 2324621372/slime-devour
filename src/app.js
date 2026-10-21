@@ -12,7 +12,7 @@ const SAVE_KEY='slime-devour-v1';
 let save={highScore:0,endlessBest:0,maxCombo:0,unlocked:1,stars:{},muted:true,quality:'auto'};
 try{save={...save,...JSON.parse(localStorage.getItem(SAVE_KEY)||'{}')};save.unlocked=clamp(Number(save.unlocked)||1,1,12);}catch{}
 function persist(){try{localStorage.setItem(SAVE_KEY,JSON.stringify(save));}catch{}}
-let renderer,world,scene,camera,dynamic,player,ring,boss,entities=[],effects=[],hazards=[];
+let renderer,world,scene,camera,dynamic,player,ring,boss,entities=[],effects=[],hazards=[],swallows=[];
 let level=levels[0],mode='level',state,paused=false,ended=false,theme=-1,frame=0,last=0,hudClock=0,spawnClock=0,toastTimer,stage=0,cityWaveAt=0,qualityLow=false;
 let audio,master;const input={x:0,y:0,active:false,id:null,startX:0,startY:0},keys=new Set();
 const playerPos=new THREE.Vector2(0,3),velocity=new THREE.Vector2(),camTarget=new THREE.Vector3();
@@ -48,13 +48,9 @@ function loadWorld(nextTheme){
 function displayRadius(){return visibleRadius(state.radius);}
 function outsideView(x,z,r=1){camera.updateMatrixWorld();const frustum=new THREE.Frustum().setFromProjectionMatrix(new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix,camera.matrixWorldInverse));return !frustum.intersectsSphere(new THREE.Sphere(new THREE.Vector3(x,r*.7,z),r*2));}
 function entityPosition(r=.5,offscreen=true){for(let i=0;i<180;i++){const angle=Math.random()*Math.PI*2,range=offscreen?cameraDistance(state.radius)*(.9+Math.random()*2)+r*3:5+Math.random()*30;const x=playerPos.x+Math.cos(angle)*range,z=playerPos.y+Math.sin(angle)*range;if(Math.abs(x)+r>MAP_EDGE||Math.abs(z)+r>MAP_EDGE||blocked(x,z,r))continue;if(offscreen&&!outsideView(x,z,r))continue;if(entities.some(e=>Math.hypot(x-e.x,z-e.z)<r*1.6+(e.visual||e.radius)*1.6))continue;return {x,z};}return null;}
-function blocked(x,z,r=.4){
- // Collision footprints correspond to the large third-version buildings.
- const rects=theme===0?[[-7.4,-2.6,-7,-2.8],[3,7,-2.5,2.5],[-7.2,-5.8,2.7,5.5]]:theme===1?[[-7.3,-2.7,-7,-3.1],[3.8,8.2,-9,-5.3],[3.2,6.8,-5.6,1.5],[3.5,6.5,1.5,4.5],[-6.5,-3.5,3.1,4.9],[-6.5,-3.5,7.1,8.9]]:[[-6.8,-5.3,2,4.2],[5.3,6.8,2,4.2],[-4.8,-3.2,-8,-6],[5.2,6.8,-8,-6]];
- return rects.some(([a,b,c,d])=>x>a-r*.6&&x<b+r*.6&&z>c-r*.6&&z<d+r*.6);
-}
+function blocked(x,z,r=.4){return world.colliders.some(c=>Math.abs(x-c.x)<c.hx+r&&Math.abs(z-c.z)<c.hz+r);}
 function makePrey(initial=false,descriptor=null,pos=null){
- if(entities.filter(e=>!e.threat).length>=230)return;
+ if(entities.filter(e=>!e.threat).length>=370)return;
  const item=descriptor||catalogItem(spawnSequence++,Math.floor(spawnSequence/12));
  const {radius,kind,preyStage}=item;pos=pos||entityPosition(radius,!initial);if(!pos)return;
  const pooledIndex=pooled.findIndex(m=>m.userData.kind===kind),mesh=pooledIndex<0?preyModel(kind):pooled.splice(pooledIndex,1)[0];dynamic.add(mesh);mesh.rotation.set(0,0,0);
@@ -62,16 +58,26 @@ function makePrey(initial=false,descriptor=null,pos=null){
  if(!initial){spawnChecks.push({id:e.id,offscreen:outsideView(e.x,e.z,e.radius),radius:e.radius});if(spawnChecks.length>100)spawnChecks.shift();}return e;
 }
 function populate(){
- // All scales exist from the first frame. Larger props occupy outer districts.
  spawnSequence=0;spawnChecks.length=0;
- for(let tier=0;tier<6;tier++)for(let i=0;i<24;i++){
+ // Keep an unobstructed trail of edible objects within the starting travel lane.
+ for(let i=0;i<18;i++){
+  const x=(i%3-1)*.65,z=3+Math.floor(i/3)*.55,radius=i%2?.2:.26;
+  if(Math.hypot(x,z-3)>1&&!blocked(x,z,radius))makePrey(true,{kind:i%2?'dust':'sugar',radius,preyStage:0},{x,z});
+ }
+ // Large landmarks are placed first, then the smaller objects fill clear space.
+ for(let tier=5;tier>=0;tier--)for(let i=0;i<36;i++){
   const item=catalogItem(tier*2+i%2,Math.floor(i/2));let pos=null;
-  for(let attempt=0;attempt<180;attempt++){const angle=(i/24)*Math.PI*2+attempt*.63,range=[5,18,48,120,280,510][tier]+Math.random()*[11,14,25,55,95,70][tier];const x=Math.cos(angle)*range,z=3+Math.sin(angle)*range,r=item.radius;
-   if(Math.abs(x)+r>MAP_EDGE||Math.abs(z)+r>MAP_EDGE||blocked(x,z,r)||entities.some(e=>Math.hypot(x-e.x,z-e.z)<r*1.65+e.radius*1.65))continue;pos={x,z};break;}
+  for(let attempt=0;attempt<220;attempt++){
+   const angle=i*2.399+attempt*.61,inner=[2,4,11,30,90,250][tier],range=inner+Math.random()*[48,65,100,180,370,640][tier];const x=Math.cos(angle)*range,z=3+Math.sin(angle)*range,r=item.radius;
+   if(Math.abs(x)+r>MAP_EDGE||Math.abs(z)+r>MAP_EDGE||Math.hypot(x,z-3)<r*2+2||blocked(x,z,r)||entities.some(e=>Math.hypot(x-e.x,z-e.z)<r*1.3+e.radius*1.3))continue;pos={x,z};break;
+  }
   if(pos)makePrey(true,item,pos);
  }
- // Small food is present at spawn even in late-level starts, with several fixed scales.
- for(let i=0;i<24;i++){const tier=i%Math.min(4,stage+1),item=catalogItem(tier*2+i%2,Math.floor(i/4));const pos=entityPosition(item.radius,false);if(pos)makePrey(true,item,pos);}
+ // A visible assortment exists around the starting lanes, including oversized props.
+ for(const [kind,radius,preyStage,x,z] of [['cap',1.1,1,2,7],['bug',1.05,1,-2,9],['cup',3.1,2,8,11],['fruit',3.2,2,-9,13],['chair',8.1,3,20,22],['pet',8.3,3,-22,22],['car',20.5,4,52,45],['streetlamp',21,4,-48,55],['building',50.5,5,145,110],['tower',54,5,-155,125]]){
+  if(!blocked(x,z,radius)&&!entities.some(e=>Math.hypot(x-e.x,z-e.z)<radius*1.2+e.radius*1.2))makePrey(true,{kind,radius,preyStage},{x,z});
+ }
+ for(let i=0;i<65;i++){const item=catalogItem(i%2,Math.floor(i/2)),pos=entityPosition(item.radius,false);if(pos)makePrey(true,item,pos);}
 }
 function makeThreat(){if(level.id===1&&mode==='level')return;const pos=entityPosition(1,true);if(!pos)return;let kind=level.id===5?'bee':level.id===6?'ball':'spike';const mesh=kind==='bee'?bee():kind==='ball'?jelly(0xeb849f):spikeBall();dynamic.add(mesh);const e={mesh,radius:1.2,x:pos.x,z:pos.z,phase:Math.random()*6.28,threat:true,kind,age:0,vx:0,vz:0};entities.push(e);placeEntity(e);}
 function placeEntity(e){e.visual=e.radius;e.mesh.position.set(e.x,.12,e.z);e.mesh.scale.setScalar(e.radius);}
@@ -91,19 +97,19 @@ function collideEntities(dt){
  for(const e of solid)placeEntity(e);
 }
 function resolveScenery(){
- const rects=theme===0?[[-7.4,-2.6,-7,-2.8],[3,7,-2.5,2.5],[-7.2,-5.8,2.7,5.5]]:theme===1?[[-7.3,-2.7,-7,-3.1],[3.8,8.2,-9,-5.3],[3.2,6.8,-5.6,1.5],[3.5,6.5,1.5,4.5],[-6.5,-3.5,3.1,4.9],[-6.5,-3.5,7.1,8.9]]:[[-6.8,-5.3,2,4.2],[5.3,6.8,2,4.2],[-4.8,-3.2,-8,-6],[5.2,6.8,-8,-6]];
- for(const [a,b,c,d] of rects){const p={x:playerPos.x,z:playerPos.y,r:displayRadius()*.94,vx:velocity.x,vz:velocity.y,invMass:1};if(resolveContact(p,{x:(a+b)/2,z:(c+d)/2,hx:(b-a)/2,hz:(d-c)/2,r:0,invMass:0},0)){playerPos.set(p.x,p.z);velocity.set(p.vx,p.vz);}}
- playerPos.x=clamp(playerPos.x,-MAP_EDGE+displayRadius(),MAP_EDGE-displayRadius());playerPos.y=clamp(playerPos.y,-MAP_EDGE+displayRadius(),MAP_EDGE-displayRadius());
+ const p={x:playerPos.x,z:playerPos.y,r:displayRadius()*.94,vx:velocity.x,vz:velocity.y,invMass:1};
+ for(const c of world.colliders){if(Math.abs(p.x-c.x)>c.hx+p.r||Math.abs(p.z-c.z)>c.hz+p.r)continue;if(resolveContact(p,c,0))state.sceneryContacts++;}
+ playerPos.set(clamp(p.x,-MAP_EDGE+displayRadius(),MAP_EDGE-displayRadius()),clamp(p.z,-MAP_EDGE+displayRadius(),MAP_EDGE-displayRadius()));velocity.set(p.vx,p.vz);
 }
 function clearDynamic(){
  pooled.forEach(o=>dynamic.add(o));
  const uniqueGeometries=new Set(),uniqueMaterials=new Set();
  dynamic.traverse(o=>{if(!o.isMesh)return;const geometry=o.geometry;if(!geometry.userData.shared)uniqueGeometries.add(geometry);if(o.material?.isMeshBasicMaterial)uniqueMaterials.add(o.material);});
- dynamic.clear();uniqueGeometries.forEach(g=>g.dispose());uniqueMaterials.forEach(m=>m.dispose());entities=[];effects=[];hazards=[];pooled.length=0;boss=null;
+ dynamic.clear();uniqueGeometries.forEach(g=>g.dispose());uniqueMaterials.forEach(m=>m.dispose());entities=[];effects=[];hazards=[];swallows=[];pooled.length=0;boss=null;
 }
 function start(id=1,newMode=mode){
  resetInput();mode=newMode;level=levels[clamp(id,1,12)-1];ended=false;paused=false;stage=0;cityWaveAt=0;spawnClock=0;hudClock=0;
- state={radius:mode==='endless'?.3:level.radius,score:0,contacts:0,combo:0,maxCombo:0,eaten:0,elapsed:0,lastEat:-10,hits:0,hp:3,invincible:0,bossHP:[4,10,12].includes(level.id)?(level.id===10?3:2):0,bossTotal:level.id===10?3:2,peakRadius:level.radius};
+ state={radius:mode==='endless'?.3:level.radius,score:0,contacts:0,sceneryContacts:0,combo:0,maxCombo:0,eaten:0,elapsed:0,lastEat:-10,hits:0,hp:3,invincible:0,bossHP:[4,10,12].includes(level.id)?(level.id===10?3:2):0,bossTotal:level.id===10?3:2,peakRadius:level.radius};
  stage=stageFor(state.radius);
  const nextTheme=mode==='endless'?0:([2,6,8,11].includes(level.id)?1:[4,10,12].includes(level.id)?2:0);
  if(dynamic)clearDynamic();loadWorld(nextTheme);playerPos.set(0,3);velocity.set(0,0);
@@ -120,11 +126,16 @@ function spawnBoss(){if(boss){dynamic.remove(boss.mesh,boss.ring);boss.ring.geom
 function removeEntity(e,pool=true){dynamic.remove(e.mesh);entities.splice(entities.indexOf(e),1);if(pool&&!e.threat&&pooled.length<30)pooled.push(e.mesh);}
 function burst(x,z,color=0xc4ffdf,count=10){for(let i=0;i<count;i++){const m=new THREE.Mesh(new THREE.OctahedronGeometry(.05,0),new THREE.MeshBasicMaterial({color,transparent:true}));m.position.set(x,.5,z);dynamic.add(m);effects.push({m,life:.6,max:.6,vx:(Math.random()-.5)*3,vy:1+Math.random()*2,vz:(Math.random()-.5)*3});}}
 function floater(points,perfect,x,z){const v=new THREE.Vector3(x,1.4,z).project(camera);const el=document.createElement('div');el.className='floating';el.style.left=`${(v.x*.5+.5)*100}%`;el.style.top=`${(-v.y*.5+.5)*100}%`;el.textContent=`+ ${points}`;if(perfect){const s=document.createElement('small');s.textContent='PERFECT';el.append(s);}$('floaters').append(el);setTimeout(()=>el.remove(),900);}
+function beginSwallow(e){
+ const index=entities.indexOf(e);if(index<0)return;entities.splice(index,1);
+ swallows.push({mesh:e.mesh,start:e.mesh.position.clone(),radius:e.radius,life:.42});player.userData.eatPulse=1;
+}
+function updateSwallows(dt){for(const e of [...swallows]){e.life-=dt;const t=clamp(1-e.life/.42,0,1),ease=t*t*(3-2*t);e.mesh.position.lerpVectors(e.start,new THREE.Vector3(playerPos.x,displayRadius()*.55,playerPos.y),ease);e.mesh.position.y+=Math.sin(t*Math.PI)*e.radius*.6;e.mesh.scale.setScalar(e.radius*(1-ease));e.mesh.rotation.y+=dt*8;if(e.life<=0){dynamic.remove(e.mesh);if(pooled.length<40)pooled.push(e.mesh);swallows.splice(swallows.indexOf(e),1);}}}
 function eat(e){
  const old=state.radius;state.combo=state.elapsed-state.lastEat<=1.2?state.combo+1:1;state.lastEat=state.elapsed;state.eaten++;state.maxCombo=Math.max(state.maxCombo,state.combo);
  const {points,perfect}=scoreFor(old,e.radius,state.combo,stage,level.id===1?18:22);state.score+=points;state.radius=grow(old,e.radius,level.absorb);state.peakRadius=Math.max(state.peakRadius,state.radius);
  floater(points,perfect,e.x,e.z);burst(e.x,e.z,perfect?0xffdb8e:0xc6ffe1,qualityLow?5:10);sound();if(perfect&&navigator.vibrate)navigator.vibrate(12);
- removeEntity(e);player.userData.bounce=.25;
+ beginSwallow(e);player.userData.bounce=.25;
  if(state.combo%10===0)toast(`${state.combo} 连击！倍率 ×${multiplier(state.combo).toFixed(2)}`);
  const next=stageFor(state.radius);if(next>stage){stage=next;toast(`进入【${STAGES[stage].name}】阶段 · ${STAGES[stage].description}`);state.score+=500*(stage+1);for(let i=0;i<2;i++)makeThreat();}
 }
@@ -142,7 +153,16 @@ function togglePause(){if(ended)return;if(paused){paused=false;$('panel').hidden
 function chooseLevel(){if(ended)return;showPause();$('panelTitle').textContent='关卡挑战';$('panelText').textContent='完成当前关卡解锁下一关；每关可反复挑战三星。';$('levelGrid').hidden=false;$('levelGrid').replaceChildren();for(const l of levels){const b=document.createElement('button');b.id=`choose-${l.id}`;b.textContent=`${l.id} ${l.name} ${'★'.repeat(save.stars[l.id]||0)}`;b.disabled=l.id>save.unlocked;$('levelGrid').append(b);bind(b.id,()=>start(l.id,'level'));}}
 bind('pause',togglePause);bind('resume',togglePause);bind('restart',()=>start(level.id));bind('retry',()=>start(level.id));bind('next',()=>start(level.id===12?1:level.id+1,level.id===12?'endless':'level'));bind('mode',()=>start(1,mode==='level'?'endless':'level'));bind('levelName',chooseLevel);bind('sound',()=>{save.muted=!save.muted;persist();unlockAudio();$('sound').textContent=save.muted?'音效关':'音效开';sound(2);});bind('quality',()=>{save.quality=save.quality==='auto'?'low':save.quality==='low'?'high':'auto';persist();applyQuality();toast(`画质：${$('quality').textContent}`);});
 
-function updatePlayer(dt){const r=displayRadius(),bounce=player.userData.bounce||0;player.userData.bounce=Math.max(0,bounce-dt);const wobble=Math.sin(state.elapsed*8)*.018+(bounce>0?Math.sin(bounce*24)*.1:0);player.position.set(playerPos.x,.13,playerPos.y);player.scale.set(r*(1+wobble),r*(1-wobble),r*(1+wobble));player.visible=state.invincible<=0||Math.floor(state.invincible*12)%2===0;ring.position.set(playerPos.x,.22,playerPos.y);ring.scale.setScalar(r);if(velocity.length()>.1){const target=Math.atan2(velocity.x,velocity.y);player.rotation.y+=Math.atan2(Math.sin(target-player.rotation.y),Math.cos(target-player.rotation.y))*Math.min(1,dt*10);}const follow=dt===0?1:1-Math.exp(-dt*7);camTarget.lerp(new THREE.Vector3(playerPos.x,r*.45,playerPos.y),follow);const distance=cameraDistance(state.radius),offset=new THREE.Vector3(.434,.644,.756).normalize().multiplyScalar(distance);const cameraFollow=dt===0?1:1-Math.exp(-dt*4);camera.position.lerp(offset.add(camTarget),cameraFollow);camera.lookAt(camTarget);}
+function updatePlayer(dt){
+ const r=displayRadius(),speed=velocity.length(),moving=clamp(speed/Math.max(2.5,r),0,1),u=player.userData;
+ u.gait=(u.gait||0)+dt*(5+moving*9);u.bounce=Math.max(0,(u.bounce||0)-dt);u.eatPulse=Math.max(0,(u.eatPulse||0)-dt*2.4);
+ const stride=Math.sin(u.gait),hop=Math.max(0,stride)*moving*.12,eat=Math.sin((u.eatPulse||0)*Math.PI),wobble=Math.sin(state.elapsed*3)*.018+stride*moving*.095+eat*.14;
+ player.position.set(playerPos.x,.13+hop*r,playerPos.y);player.scale.set(r*(1+wobble*.65),r*(1-wobble),r*(1+wobble*.65));
+ player.rotation.x=THREE.MathUtils.damp(player.rotation.x,moving*.13,8,dt);player.rotation.z=THREE.MathUtils.damp(player.rotation.z,Math.sin(u.gait*.5)*moving*.06,8,dt);
+ if(u.mouth){u.mouth.scale.set(1+eat*1.5,1+eat*3,1);u.mouth.position.y=.57-eat*.04;}
+ player.visible=state.invincible<=0||Math.floor(state.invincible*12)%2===0;ring.position.set(playerPos.x,.22,playerPos.y);ring.scale.setScalar(r);
+ if(speed>.1){const target=Math.atan2(velocity.x,velocity.y);player.rotation.y+=Math.atan2(Math.sin(target-player.rotation.y),Math.cos(target-player.rotation.y))*Math.min(1,dt*10);}
+ const follow=dt===0?1:1-Math.exp(-dt*7);camTarget.lerp(new THREE.Vector3(playerPos.x,r*.45,playerPos.y),follow);const distance=cameraDistance(state.radius),offset=new THREE.Vector3(.434,.644,.756).normalize().multiplyScalar(distance);const cameraFollow=dt===0?1:1-Math.exp(-dt*4);camera.position.lerp(offset.add(camTarget),cameraFollow);camera.lookAt(camTarget);}
 
 function updateBoss(dt){if(!boss||boss.hp<=0)return;const b=boss;b.phase+=dt;b.hitCooldown=Math.max(0,b.hitCooldown-dt);const cycle=b.phase%9;const vulnerable=cycle>=6.5;const warning=cycle>=3.6&&cycle<4.6;const charging=cycle>=4.6&&cycle<6.5;
  if(cycle<.1){b.vx=0;b.vz=0;b.waveDone=false;}
@@ -179,7 +199,7 @@ function update(dt){
  if(mode==='endless'&&stage===5&&state.elapsed>=cityWaveAt&&(!boss||boss.hp<=0)){state.bossHP=3;state.bossTotal=3;spawnBoss();$('bossbar').hidden=false;cityWaveAt=state.elapsed+35;}
  updateBoss(dt);
  for(const e of [...effects]){e.life-=dt;if(e.wave){const radius=.3+(e.max-e.life)*3;e.m.scale.setScalar(radius/.3);e.m.material.opacity=e.life/e.max;if(Math.abs(Math.hypot(playerPos.x-e.x,playerPos.y-e.z)-radius)<pr*.5)damage();}else{e.m.position.x+=e.vx*dt;e.m.position.y+=e.vy*dt;e.m.position.z+=e.vz*dt;e.vy-=5*dt;e.m.material.opacity=Math.max(0,e.life/e.max);}if(e.life<=0){dynamic.remove(e.m);e.m.geometry.dispose();e.m.material.dispose();effects.splice(effects.indexOf(e),1);}}
- updatePlayer(dt);
+ updateSwallows(dt);updatePlayer(dt);
  if(mode==='level'){if(objective(level,state).done)finish(true);else if(level.limit&&state.elapsed>=level.limit)finish(false);}
  hudClock+=dt;if(hudClock>.1){hudClock=0;updateHUD();}
 }
@@ -190,5 +210,5 @@ try{
  renderer.domElement.addEventListener('webglcontextlost',e=>{e.preventDefault();showPause();toast('图形上下文暂时中断，请刷新恢复');});
  loadWorld(0);applyQuality();start(1,'level');requestAnimationFrame(animate);
  // Read-only diagnostics help verify offline and mobile builds without altering play.
- Object.defineProperty(window,'slimeGame',{value:{snapshot:()=>({...state,mode,level:level.id,paused,ended,entities:entities.length,frame,drawCalls:renderer.info.render.calls,qualityLow,stage,stageName:STAGES[stage].name,visualRadius:displayRadius(),camera:{x:camera.position.x,y:camera.position.y,z:camera.position.z,distance:camera.position.distanceTo(camTarget),target:{x:camTarget.x,y:camTarget.y,z:camTarget.z},playerNDC:player.position.clone().add(new THREE.Vector3(0,displayRadius()*.45,0)).project(camera).toArray()},position:{x:playerPos.x,z:playerPos.y},spawnChecks:[...spawnChecks],prey:entities.filter(e=>!e.threat).map(e=>({id:e.id,scale:e.mesh.scale.x,x:e.x,z:e.z,radius:e.radius,kind:e.kind,name:PREY_NAMES[e.kind],stage:e.preyStage,edible:canEat(state.radius,e.radius)})),saved:JSON.parse(JSON.stringify(save))})}});
+ Object.defineProperty(window,'slimeGame',{value:{snapshot:()=>({...state,mode,level:level.id,paused,ended,entities:entities.length,frame,drawCalls:renderer.info.render.calls,qualityLow,stage,stageName:STAGES[stage].name,visualRadius:displayRadius(),camera:{x:camera.position.x,y:camera.position.y,z:camera.position.z,distance:camera.position.distanceTo(camTarget),target:{x:camTarget.x,y:camTarget.y,z:camTarget.z},playerNDC:player.position.clone().add(new THREE.Vector3(0,displayRadius()*.45,0)).project(camera).toArray()},position:{x:playerPos.x,z:playerPos.y},animation:{gait:player.userData.gait,eatPulse:player.userData.eatPulse,swallows:swallows.length,scale:player.scale.toArray(),height:player.position.y},mapEdge:MAP_EDGE,sceneryColliders:world.colliders.length,spawnChecks:[...spawnChecks],prey:entities.filter(e=>!e.threat).map(e=>({id:e.id,scale:e.mesh.scale.x,x:e.x,z:e.z,radius:e.radius,kind:e.kind,name:PREY_NAMES[e.kind],stage:e.preyStage,edible:canEat(state.radius,e.radius)})),saved:JSON.parse(JSON.stringify(save))})}});
 }catch(error){console.error(error);$('loading').hidden=true;$('error').hidden=false;$('error').textContent='无法启动 3D 画面。请使用支持 WebGL 2 的新版 Chrome、Edge 或 Safari，并开启浏览器硬件加速。';}
