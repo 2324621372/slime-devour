@@ -1,8 +1,9 @@
 import * as THREE from 'three';
 import {createWorld} from './world.js';
 import levels from './levels.json';
-import {canEat,grow,multiplier,scoreFor,objective,starsFor,STAGES} from './rules.js';
+import {canEat,grow,multiplier,scoreFor,objective,starsFor,STAGES,stageFor,renderReference,visibleRadius,cameraDistance} from './rules.js';
 import {jelly,spikeBall,bee,material} from './models.js';
+import {preyModel,preyKind,PREY_NAMES} from './prey.js';
 
 const $=id=>document.getElementById(id),clamp=THREE.MathUtils.clamp;
 const SAVE_KEY='slime-devour-v1';
@@ -10,7 +11,7 @@ let save={highScore:0,endlessBest:0,maxCombo:0,unlocked:1,stars:{},muted:true,qu
 try{save={...save,...JSON.parse(localStorage.getItem(SAVE_KEY)||'{}')};save.unlocked=clamp(Number(save.unlocked)||1,1,12);}catch{}
 function persist(){try{localStorage.setItem(SAVE_KEY,JSON.stringify(save));}catch{}}
 let renderer,world,scene,camera,dynamic,player,ring,boss,entities=[],effects=[],hazards=[];
-let level=levels[0],mode='level',state,paused=false,ended=false,theme=-1,frame=0,last=0,hudClock=0,spawnClock=0,toastTimer,zoom=1,stage=0,qualityLow=false;
+let level=levels[0],mode='level',state,paused=false,ended=false,theme=-1,frame=0,last=0,hudClock=0,spawnClock=0,toastTimer,stage=0,cityWaveAt=0,qualityLow=false;
 let audio,master;const input={x:0,y:0,active:false,id:null,startX:0,startY:0},keys=new Set();
 const playerPos=new THREE.Vector2(0,3),velocity=new THREE.Vector2(),camTarget=new THREE.Vector3();
 const pooled=[];let dpr=1,frameCost=0,samples=0;
@@ -41,9 +42,8 @@ function loadWorld(nextTheme){
  camera.position.set(15.5,23,26);camera.lookAt(0,0,-1);resize();
  scene.traverse(o=>{if(o.isLight&&o.shadow)o.castShadow=!qualityLow;});
 }
-const colors=[0x8bdfb7,0xf5b985,0xedacd0,0x94d1ef];
-function displayRadius(){return clamp(1.03+Math.log2(state.radius/level.radius)*.17,.75,1.8);}
-function screenScale(){return mode==='endless'?state.radius/(displayRadius()||1):state.radius/displayRadius();}
+function displayRadius(){return visibleRadius(state.radius);}
+function screenScale(){return renderReference(state.radius);}
 function entityPosition(){let x,z;for(let i=0;i<30;i++){x=(Math.random()-.5)*17;z=(Math.random()-.5)*21;if(Math.hypot(x-playerPos.x,z-playerPos.y)>2.3&&!blocked(x,z,.35))return {x,z};}return {x:clamp(playerPos.x+3,-8,8),z:clamp(playerPos.y-3,-10,10)};}
 function blocked(x,z,r=.4){
  // Collision footprints correspond to the large third-version buildings.
@@ -54,14 +54,14 @@ function makePrey(initial=false,chain=false){
  if(entities.filter(e=>!e.threat).length>=Math.min(60,level.maxPrey))return;
  let radius;
  if(initial)radius=THREE.MathUtils.lerp(level.preyMin,Math.min(level.preyMax,state.radius*.9),Math.random());
- else radius=state.radius*(.43+Math.random()*.49);
+ else radius=state.radius*(.5+Math.random()*(Math.random()<.18?1.15:.44));
  const pos=entityPosition();
  if(chain){const a=Math.random()*Math.PI*2,dist=1.5+Math.random()*1.5;pos.x=clamp(playerPos.x+Math.cos(a)*dist,-8.8,8.8);pos.z=clamp(playerPos.y+Math.sin(a)*dist,-10.5,10.5);if(blocked(pos.x,pos.z))return;}
- const color=colors[Math.floor(Math.random()*4)],mesh=pooled.pop()||jelly(color);mesh.userData.body.material=material(color);dynamic.add(mesh);
- const e={mesh,radius,x:pos.x,z:pos.z,phase:Math.random()*6.28,threat:false,vx:(Math.random()-.5)*.35,vz:(Math.random()-.5)*.35,age:0};entities.push(e);placeEntity(e);
+ const preyStage=stageFor(radius),kind=preyKind(preyStage),pooledIndex=pooled.findIndex(m=>m.userData.kind===kind),mesh=pooledIndex<0?preyModel(kind):pooled.splice(pooledIndex,1)[0];dynamic.add(mesh);
+ const e={mesh,radius,kind,preyStage,x:pos.x,z:pos.z,phase:Math.random()*6.28,threat:false,vx:(Math.random()-.5)*.35,vz:(Math.random()-.5)*.35,age:0};entities.push(e);placeEntity(e);
 }
 function makeThreat(){if(level.id===1&&mode==='level')return;const pos=entityPosition();let kind=level.id===5?'bee':level.id===6?'ball':'spike';const mesh=kind==='bee'?bee():kind==='ball'?jelly(0xeb849f):spikeBall();dynamic.add(mesh);const e={mesh,radius:state.radius*(1.35+Math.random()*.8),x:pos.x,z:pos.z,phase:Math.random()*6.28,threat:true,kind,age:0,vx:0,vz:0};entities.push(e);placeEntity(e);}
-function placeEntity(e){const r=e.threat?clamp(e.radius/screenScale(),.7,1.4):clamp(e.radius/screenScale(),.16,displayRadius()*.94);e.visual=r;e.mesh.position.set(e.x,.12,e.z);e.mesh.scale.setScalar(r);}
+function placeEntity(e){const r=e.threat?clamp(e.radius/screenScale(),.7,1.4):clamp(e.radius/screenScale(),.035,5);e.visual=r;e.mesh.position.set(e.x,.12,e.z);e.mesh.scale.setScalar(r);}
 function clearDynamic(){
  pooled.forEach(o=>dynamic.add(o));
  const uniqueGeometries=new Set(),uniqueMaterials=new Set();
@@ -69,8 +69,9 @@ function clearDynamic(){
  dynamic.clear();uniqueGeometries.forEach(g=>g.dispose());uniqueMaterials.forEach(m=>m.dispose());entities=[];effects=[];hazards=[];pooled.length=0;boss=null;
 }
 function start(id=1,newMode=mode){
- resetInput();mode=newMode;level=levels[clamp(id,1,12)-1];ended=false;paused=false;stage=0;zoom=1;spawnClock=0;hudClock=0;
- state={radius:level.radius,score:0,combo:0,maxCombo:0,eaten:0,elapsed:0,lastEat:-10,hits:0,hp:3,invincible:0,bossHP:[4,10,12].includes(level.id)?(level.id===10?3:2):0,bossTotal:level.id===10?3:2,peakRadius:level.radius};
+ resetInput();mode=newMode;level=levels[clamp(id,1,12)-1];ended=false;paused=false;stage=0;cityWaveAt=0;spawnClock=0;hudClock=0;
+ state={radius:mode==='endless'?.3:level.radius,score:0,combo:0,maxCombo:0,eaten:0,elapsed:0,lastEat:-10,hits:0,hp:3,invincible:0,bossHP:[4,10,12].includes(level.id)?(level.id===10?3:2):0,bossTotal:level.id===10?3:2,peakRadius:level.radius};
+ stage=stageFor(state.radius);
  const nextTheme=mode==='endless'?0:([2,6,8,11].includes(level.id)?1:[4,10,12].includes(level.id)?2:0);
  if(dynamic)clearDynamic();loadWorld(nextTheme);playerPos.set(0,3);velocity.set(0,0);
  player=jelly(world.palette.main);player.rotation.y=.5;dynamic.add(player);
@@ -82,9 +83,9 @@ function start(id=1,newMode=mode){
  if(mode==='level'&&[4,10,12].includes(level.id))spawnBoss();
  if(level.id===7&&mode==='level')for(const x of [-3,3]){const beam=new THREE.Mesh(new THREE.BoxGeometry(.08,1.6,7),new THREE.MeshBasicMaterial({color:0xff6479,transparent:true,opacity:.65}));beam.position.set(x,.8,0);dynamic.add(beam);hazards.push({mesh:beam,x});}
  $('panel').hidden=true;$('loading').hidden=true;$('mode').textContent=mode==='endless'?'无尽 / 关卡':'关卡 / 无尽';$('sound').textContent=save.muted?'音效关':'音效开';$('bossbar').hidden=!boss;
- toast(mode==='endless'?'无尽成长 · 连击越高，得分越多':`${String(level.id).padStart(2,'0')} ${level.name} · ${level.id===1?'只吞比你小的果冻':'躲开红色威胁'}`);updateHUD();updatePlayer(0);renderer.render(scene,camera);
+ toast(mode==='endless'?'无尽成长 · 连击越高，得分越多':`${String(level.id).padStart(2,'0')} ${level.name} · ${level.id===1?'吞噬灰尘与糖粒':'躲开红色威胁'}`);camTarget.set(playerPos.x,displayRadius()*.45,playerPos.y);updateHUD();updatePlayer(0);renderer.render(scene,camera);
 }
-function spawnBoss(){const m=jelly(level.id===4?0xe9b773:level.id===12?0x9d7de0:0xf28a62,true);dynamic.add(m);boss={mesh:m,x:1,z:-5,hp:state.bossHP,total:state.bossTotal,phase:0,cycle:0,vx:0,vz:0,hitCooldown:0,waveDone:false,split:false};const warning=new THREE.Mesh(new THREE.TorusGeometry(2.8,.045,5,64),new THREE.MeshBasicMaterial({color:0xffa27a,transparent:true,opacity:.8}));warning.rotation.x=-Math.PI/2;dynamic.add(warning);boss.ring=warning;}
+function spawnBoss(){if(boss){dynamic.remove(boss.mesh,boss.ring);boss.ring.geometry.dispose();boss.ring.material.dispose();}const m=jelly(level.id===4?0xe9b773:level.id===12?0x9d7de0:0xf28a62,true);dynamic.add(m);boss={mesh:m,x:1,z:-5,hp:state.bossHP,total:state.bossTotal,phase:0,cycle:0,vx:0,vz:0,hitCooldown:0,waveDone:false,split:false};const warning=new THREE.Mesh(new THREE.TorusGeometry(2.8,.045,5,64),new THREE.MeshBasicMaterial({color:0xffa27a,transparent:true,opacity:.8}));warning.rotation.x=-Math.PI/2;dynamic.add(warning);boss.ring=warning;}
 function removeEntity(e,pool=true){dynamic.remove(e.mesh);entities.splice(entities.indexOf(e),1);if(pool&&!e.threat&&pooled.length<30)pooled.push(e.mesh);}
 function burst(x,z,color=0xc4ffdf,count=10){for(let i=0;i<count;i++){const m=new THREE.Mesh(new THREE.OctahedronGeometry(.05,0),new THREE.MeshBasicMaterial({color,transparent:true}));m.position.set(x,.5,z);dynamic.add(m);effects.push({m,life:.6,max:.6,vx:(Math.random()-.5)*3,vy:1+Math.random()*2,vz:(Math.random()-.5)*3});}}
 function floater(points,perfect,x,z){const v=new THREE.Vector3(x,1.4,z).project(camera);const el=document.createElement('div');el.className='floating';el.style.left=`${(v.x*.5+.5)*100}%`;el.style.top=`${(-v.y*.5+.5)*100}%`;el.textContent=`+ ${points}`;if(perfect){const s=document.createElement('small');s.textContent='PERFECT';el.append(s);}$('floaters').append(el);setTimeout(()=>el.remove(),900);}
@@ -96,7 +97,7 @@ function eat(e){
  if(state.combo%10===0)toast(`${state.combo} 连击！倍率 ×${multiplier(state.combo).toFixed(2)}`);
  // Replenish near the route, keeping combo challenges achievable.
  for(let i=0;i<(level.id===8?3:2);i++)makePrey(false,true);
- if(mode==='endless'){const next=STAGES.reduce((a,s,i)=>state.radius>=s.min?i:a,0);if(next>stage){stage=next;toast(`进入「${STAGES[stage].name}」阶段 · 镜头拉远`);state.score+=500*(stage+1);zoom=1.18;for(let i=0;i<2;i++)makeThreat();}}
+ const next=stageFor(state.radius);if(next>stage){stage=next;toast(`进入【${STAGES[stage].name}】阶段 · ${STAGES[stage].description}`);state.score+=500*(stage+1);for(let i=0;i<2;i++)makeThreat();}
 }
 function damage(){if(state.invincible>0||ended)return;state.hp--;state.hits++;state.invincible=1.8;state.combo=0;sound(1);burst(playerPos.x,playerPos.y,0xff9eac,12);if(navigator.vibrate)navigator.vibrate(40);toast(level.id===7?'触碰激光，无伤挑战失败':'受击！远离红色威胁');if(state.hp<=0||level.id===7)finish(false);}
 function finish(won){
@@ -112,7 +113,8 @@ function togglePause(){if(ended)return;if(paused){paused=false;$('panel').hidden
 function chooseLevel(){if(ended)return;showPause();$('panelTitle').textContent='关卡挑战';$('panelText').textContent='完成当前关卡解锁下一关；每关可反复挑战三星。';$('levelGrid').hidden=false;$('levelGrid').replaceChildren();for(const l of levels){const b=document.createElement('button');b.id=`choose-${l.id}`;b.textContent=`${l.id} ${l.name} ${'★'.repeat(save.stars[l.id]||0)}`;b.disabled=l.id>save.unlocked;$('levelGrid').append(b);bind(b.id,()=>start(l.id,'level'));}}
 bind('pause',togglePause);bind('resume',togglePause);bind('restart',()=>start(level.id));bind('retry',()=>start(level.id));bind('next',()=>start(level.id===12?1:level.id+1,level.id===12?'endless':'level'));bind('mode',()=>start(1,mode==='level'?'endless':'level'));bind('levelName',chooseLevel);bind('sound',()=>{save.muted=!save.muted;persist();unlockAudio();$('sound').textContent=save.muted?'音效关':'音效开';sound(2);});bind('quality',()=>{save.quality=save.quality==='auto'?'low':save.quality==='low'?'high':'auto';persist();applyQuality();toast(`画质：${$('quality').textContent}`);});
 
-function updatePlayer(dt){const r=displayRadius(),bounce=player.userData.bounce||0;player.userData.bounce=Math.max(0,bounce-dt);const wobble=Math.sin(state.elapsed*8)*.018+(bounce>0?Math.sin(bounce*24)*.1:0);player.position.set(playerPos.x,.13,playerPos.y);player.scale.set(r*(1+wobble),r*(1-wobble),r*(1+wobble));player.visible=state.invincible<=0||Math.floor(state.invincible*12)%2===0;ring.position.set(playerPos.x,.22,playerPos.y);ring.scale.setScalar(r);if(velocity.length()>.1){const target=Math.atan2(velocity.x,velocity.y);player.rotation.y+=Math.atan2(Math.sin(target-player.rotation.y),Math.cos(target-player.rotation.y))*Math.min(1,dt*10);}const lookX=playerPos.x*.36,lookZ=playerPos.y*.3-1;camTarget.set(lookX,0,lookZ);const distance=(1+(r-1)*.12)*zoom;camera.position.lerp(new THREE.Vector3(lookX+15.5*distance,23*distance,lookZ+27*distance),Math.min(1,dt*3||1));camera.lookAt(camTarget);zoom=THREE.MathUtils.lerp(zoom,1,dt*2);}
+function updatePlayer(dt){const r=displayRadius(),bounce=player.userData.bounce||0;player.userData.bounce=Math.max(0,bounce-dt);const wobble=Math.sin(state.elapsed*8)*.018+(bounce>0?Math.sin(bounce*24)*.1:0);player.position.set(playerPos.x,.13,playerPos.y);player.scale.set(r*(1+wobble),r*(1-wobble),r*(1+wobble));player.visible=state.invincible<=0||Math.floor(state.invincible*12)%2===0;ring.position.set(playerPos.x,.22,playerPos.y);ring.scale.setScalar(r);if(velocity.length()>.1){const target=Math.atan2(velocity.x,velocity.y);player.rotation.y+=Math.atan2(Math.sin(target-player.rotation.y),Math.cos(target-player.rotation.y))*Math.min(1,dt*10);}const follow=dt===0?1:1-Math.exp(-dt*7);camTarget.lerp(new THREE.Vector3(playerPos.x,r*.45,playerPos.y),follow);const distance=cameraDistance(state.radius),offset=new THREE.Vector3(.434,.644,.756).normalize().multiplyScalar(distance);const cameraFollow=dt===0?1:1-Math.exp(-dt*4);camera.position.lerp(offset.add(camTarget),cameraFollow);camera.lookAt(camTarget);}
+
 function updateBoss(dt){if(!boss||boss.hp<=0)return;const b=boss;b.phase+=dt;b.hitCooldown=Math.max(0,b.hitCooldown-dt);const cycle=b.phase%9;const vulnerable=cycle>=6.5;const warning=cycle>=3.6&&cycle<4.6;const charging=cycle>=4.6&&cycle<6.5;
  if(cycle<.1){b.vx=0;b.vz=0;b.waveDone=false;}
  const dx=playerPos.x-b.x,dz=playerPos.y-b.z,dist=Math.hypot(dx,dz)||1;
@@ -135,9 +137,10 @@ function update(dt){
  let boundary=mode==='level'&&level.id===12?Math.max(6.4,10.5-state.elapsed*.025):10.7;const nx=clamp(playerPos.x+velocity.x*dt,-8.9,8.9),nz=clamp(playerPos.y+velocity.y*dt,-boundary,boundary);if(!blocked(nx,playerPos.y,displayRadius()))playerPos.x=nx;if(!blocked(playerPos.x,nz,displayRadius()))playerPos.y=nz;
  const pr=displayRadius();
  for(const e of [...entities]){
+  if(!e.threat&&e.radius<state.radius*.12){removeEntity(e);continue;}
   e.age+=dt;const dx=playerPos.x-e.x,dz=playerPos.y-e.z,dist=Math.hypot(dx,dz)||.001;
   if(e.threat){if(e.kind==='bee'){e.x+=dx/dist*dt*1.25;e.z+=dz/dist*dt*1.25;}else if(level.id===2){/* Fixed obstacles teach safe routes. */}else if(e.kind==='ball'){e.x+=Math.cos(e.phase)*dt*2.5;e.z+=Math.sin(e.phase)*dt*2.5;if(Math.abs(e.x)>8.5||Math.abs(e.z)>10)e.phase+=Math.PI;}else {e.x+=Math.cos(e.phase+state.elapsed*.45)*dt*.7;e.z+=Math.sin(e.phase+state.elapsed*.45)*dt*.7;}}
-  else{const flee=level.id>2&&dist<2.5&&state.radius>e.radius?-.3:0;const xx=e.x+(e.vx+dx/dist*flee)*dt,zz=e.z+(e.vz+dz/dist*flee)*dt;if(Math.abs(xx)<8.7&&!blocked(xx,e.z,.2))e.x=xx;else e.vx*=-1;if(Math.abs(zz)<10.4&&!blocked(e.x,zz,.2))e.z=zz;else e.vz*=-1;}
+  else{const moving=['bug','pet'].includes(e.kind);const flee=moving&&level.id>2&&dist<2.5&&state.radius>e.radius?-.3:0;const xx=e.x+((moving?e.vx:0)+dx/dist*flee)*dt,zz=e.z+((moving?e.vz:0)+dz/dist*flee)*dt;if(Math.abs(xx)<8.7&&!blocked(xx,e.z,.2))e.x=xx;else e.vx*=-1;if(Math.abs(zz)<10.4&&!blocked(e.x,zz,.2))e.z=zz;else e.vz*=-1;}
   placeEntity(e);e.mesh.position.y=.13+Math.sin(e.phase+state.elapsed*3)*.035;e.mesh.rotation.y=.5+Math.sin(e.phase+state.elapsed)*.2;
   const edible=!e.threat&&canEat(state.radius,e.radius);e.mesh.userData.body?.material?.emissive.setHex(edible?0x092119:0x000000);
   if(dist<pr*.67+e.visual*.65){if(edible)eat(e);else if(e.threat)damage();}
@@ -145,18 +148,19 @@ function update(dt){
  spawnClock+=dt;if(spawnClock>=Math.max(.45,level.spawnInterval*(mode==='endless'?Math.max(.35,1-stage*.1):1))){spawnClock=0;for(let i=0;i<3;i++)makePrey();if(entities.filter(e=>e.threat).length<(mode==='endless'?Math.min(8,2+stage):Math.min(level.maxThreats,level.initialThreats)))makeThreat();}
  for(const h of hazards){const active=state.elapsed%6>3;h.mesh.visible=active;if(active&&Math.abs(playerPos.x-h.x)<pr*.65+.1&&Math.abs(playerPos.y)<3.5)damage();}
  if(level.id===10&&Math.abs(playerPos.x)>7.8&&mode==='level')damage();
+ if(mode==='endless'&&stage===5&&state.elapsed>=cityWaveAt&&(!boss||boss.hp<=0)){state.bossHP=3;state.bossTotal=3;spawnBoss();$('bossbar').hidden=false;cityWaveAt=state.elapsed+35;}
  updateBoss(dt);
  for(const e of [...effects]){e.life-=dt;if(e.wave){const radius=.3+(e.max-e.life)*3;e.m.scale.setScalar(radius/.3);e.m.material.opacity=e.life/e.max;if(Math.abs(Math.hypot(playerPos.x-e.x,playerPos.y-e.z)-radius)<pr*.5)damage();}else{e.m.position.x+=e.vx*dt;e.m.position.y+=e.vy*dt;e.m.position.z+=e.vz*dt;e.vy-=5*dt;e.m.material.opacity=Math.max(0,e.life/e.max);}if(e.life<=0){dynamic.remove(e.m);e.m.geometry.dispose();e.m.material.dispose();effects.splice(effects.indexOf(e),1);}}
  updatePlayer(dt);
  if(mode==='level'){if(objective(level,state).done)finish(true);else if(level.limit&&state.elapsed>=level.limit)finish(false);}
  hudClock+=dt;if(hudClock>.1){hudClock=0;updateHUD();}
 }
-function updateHUD(){if(!state)return;$('score').textContent=state.score.toLocaleString();$('best').textContent=(mode==='endless'?save.endlessBest:save.highScore).toLocaleString();$('combo').textContent=`${state.combo} 连击`;$('multiplier').textContent=`×${multiplier(state.combo).toFixed(2)}`;$('maxCombo').textContent=`${state.maxCombo} COMBO`;$('size').textContent=`体型 ${state.radius.toFixed(2)}`;$('health').textContent='♥ '.repeat(Math.max(0,state.hp));const seconds=Math.floor(mode==='level'&&level.limit?Math.max(0,level.limit-state.elapsed):state.elapsed);$('timer').textContent=`${String(Math.floor(seconds/60)).padStart(2,'0')}:${String(seconds%60).padStart(2,'0')}`;$('levelName').textContent=mode==='endless'?`∞ 无尽 · ${STAGES[stage].name} ▾`:`${String(level.id).padStart(2,'0')} ${level.name} ▾`;$('stars').textContent=mode==='endless'?`阶段 ${stage+1}`:'★'.repeat(save.stars[level.id]||0)+'☆'.repeat(3-(save.stars[level.id]||0));const o=mode==='endless'?{value:state.radius,target:STAGES[stage+1]?.min||state.radius*1.5,label:`下一阶段 ${STAGES[stage+1]?.name||'无限成长'} · 最高分 ${save.endlessBest}`}:objective(level,state);$('goal').textContent=o.label+(mode==='level'&&[1,2,5,6,7,8,9,11].includes(level.id)?`　${o.value.toFixed(Number.isInteger(o.target)?0:2)} / ${o.target}`:'');$('progress').style.width=`${clamp(o.value/o.target,0,1)*100}%`;$('hint').textContent=state.elapsed<6?'拖动任意空白处移动 · 吞比你小的果冻':boss&&boss.hp?'躲开蓄力冲刺 · 虚弱时靠近反击':level.id===9?'冰面有惯性 · 提前转弯':state.combo>2?'继续吞噬！1.2 秒内续上连击':'寻找小果冻 · 靠近体型的猎物分数更高';}
+function updateHUD(){if(!state)return;$('score').textContent=state.score.toLocaleString();$('best').textContent=(mode==='endless'?save.endlessBest:save.highScore).toLocaleString();$('combo').textContent=`${state.combo} 连击`;$('multiplier').textContent=`×${multiplier(state.combo).toFixed(2)}`;$('maxCombo').textContent=`${state.maxCombo} COMBO`;$('size').textContent=`${STAGES[stage].name} ${state.radius.toFixed(2)}`;$('health').textContent='♥ '.repeat(Math.max(0,state.hp));const seconds=Math.floor(mode==='level'&&level.limit?Math.max(0,level.limit-state.elapsed):state.elapsed);$('timer').textContent=`${String(Math.floor(seconds/60)).padStart(2,'0')}:${String(seconds%60).padStart(2,'0')}`;$('levelName').textContent=mode==='endless'?`∞ 无尽 · ${STAGES[stage].name} ▾`:`${String(level.id).padStart(2,'0')} ${level.name} ▾`;$('stars').textContent=mode==='endless'?`阶段 ${stage+1}`:'★'.repeat(save.stars[level.id]||0)+'☆'.repeat(3-(save.stars[level.id]||0));const o=mode==='endless'?{value:state.radius,target:STAGES[stage+1]?.min||state.radius*1.5,label:`下一阶段 ${STAGES[stage+1]?.name||'无限成长'} · 最高分 ${save.endlessBest}`}:objective(level,state);$('goal').textContent=o.label+(mode==='level'&&[1,2,5,6,7,8,9,11].includes(level.id)?`　${o.value.toFixed(Number.isInteger(o.target)?0:2)} / ${o.target}`:'');$('progress').style.width=`${clamp(o.value/o.target,0,1)*100}%`;$('hint').textContent=state.elapsed<6?`拖动移动 · ${STAGES[stage].name} · 吞比你小的物件`:boss&&boss.hp?'躲开蓄力冲刺 · 虚弱时靠近反击':level.id===9?'冰面有惯性 · 提前转弯':state.combo>2?'继续吞噬！1.2 秒内续上连击':`${STAGES[stage].description} · 可吞上限 ${(state.radius*.95).toFixed(2)}`;}
 function animate(t){requestAnimationFrame(animate);if(!renderer||!state)return;const startTime=performance.now();const dt=Math.min(.05,(t-last)/1000||.016);last=t;const rotated=matchMedia('(orientation:landscape) and (hover:none)').matches;if(!paused&&!ended&&!document.hidden&&!rotated)update(dt);if(!document.hidden){renderer.render(scene,camera);frame++;}frameCost+=performance.now()-startTime;samples++;if(samples===120){if(save.quality==='auto'&&!qualityLow&&frameCost/samples>25){save.quality='low';applyQuality();toast('已切换流畅画质');}samples=0;frameCost=0;}}
 try{
  renderer=new THREE.WebGLRenderer({antialias:true,powerPreference:'high-performance'});renderer.outputColorSpace=THREE.SRGBColorSpace;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.15;renderer.shadowMap.type=THREE.PCFSoftShadowMap;$('world').append(renderer.domElement);
  renderer.domElement.addEventListener('webglcontextlost',e=>{e.preventDefault();showPause();toast('图形上下文暂时中断，请刷新恢复');});
  loadWorld(0);applyQuality();start(1,'level');requestAnimationFrame(animate);
  // Read-only diagnostics help verify offline and mobile builds without altering play.
- Object.defineProperty(window,'slimeGame',{value:{snapshot:()=>({...state,mode,level:level.id,paused,ended,entities:entities.length,frame,drawCalls:renderer.info.render.calls,qualityLow,position:{x:playerPos.x,z:playerPos.y},prey:entities.filter(e=>!e.threat).map(e=>({x:e.x,z:e.z,radius:e.radius})),saved:JSON.parse(JSON.stringify(save))})}});
+ Object.defineProperty(window,'slimeGame',{value:{snapshot:()=>({...state,mode,level:level.id,paused,ended,entities:entities.length,frame,drawCalls:renderer.info.render.calls,qualityLow,stage,stageName:STAGES[stage].name,visualRadius:displayRadius(),camera:{x:camera.position.x,y:camera.position.y,z:camera.position.z,distance:camera.position.distanceTo(camTarget),target:{x:camTarget.x,y:camTarget.y,z:camTarget.z},playerNDC:player.position.clone().add(new THREE.Vector3(0,displayRadius()*.45,0)).project(camera).toArray()},position:{x:playerPos.x,z:playerPos.y},prey:entities.filter(e=>!e.threat).map(e=>({x:e.x,z:e.z,radius:e.radius,kind:e.kind,name:PREY_NAMES[e.kind],stage:e.preyStage,edible:canEat(state.radius,e.radius)})),saved:JSON.parse(JSON.stringify(save))})}});
 }catch(error){console.error(error);$('loading').hidden=true;$('error').hidden=false;$('error').textContent='无法启动 3D 画面。请使用支持 WebGL 2 的新版 Chrome、Edge 或 Safari，并开启浏览器硬件加速。';}

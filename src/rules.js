@@ -1,8 +1,16 @@
 export const STAGES = [
-  {name:'微尘', min:0, ref:.45}, {name:'小宠', min:1, ref:1.2},
-  {name:'桌宠', min:3, ref:3.5}, {name:'房间', min:8, ref:9},
-  {name:'街区', min:20, ref:22}, {name:'城市', min:50, ref:55}
+  {name:'微尘', min:.3, prey:['dust','sugar'], description:'桌面灰尘、糖粒'},
+  {name:'小宠', min:1, prey:['bug','cap'], description:'昆虫、瓶盖'},
+  {name:'桌宠', min:3, prey:['cup','fruit'], description:'杯子、水果'},
+  {name:'房间', min:8, prey:['chair','pet'], description:'家具、宠物'},
+  {name:'街区', min:20, prey:['car','streetlamp'], description:'汽车、路灯'},
+  {name:'城市', min:50, prey:['building','tower'], description:'建筑剪影、Boss 波次'}
 ];
+export const stageFor = radius => STAGES.reduce((found,s,i)=>radius>=s.min?i:found,0);
+// Continuous reference scale avoids a visual jump at every named stage boundary.
+export const renderReference = radius => 1 + radius/3;
+export const visibleRadius = radius => radius/renderReference(radius);
+export const cameraDistance = radius => 13 + 10*Math.sqrt(visibleRadius(radius));
 export const canEat = (player, prey) => prey <= player * .95;
 export const grow = (r, prey, absorb=.85) => Math.cbrt(r**3 + prey**3 * absorb);
 export const multiplier = combo => 1 + Math.min(combo,50)*.08;
@@ -14,7 +22,7 @@ export function scoreFor(player,prey,combo,stage=0,base=12){
 }
 export function objective(level,s){
   switch(level.id){
-    case 1:return {value:s.eaten,target:20,label:'吞噬小果冻',done:s.eaten>=20};
+    case 1:return {value:s.eaten,target:20,label:'吞噬小物件',done:s.eaten>=20};
     case 2:case 6:return {value:s.radius,target:level.target,label:'成长体型',done:s.radius>=level.target};
     case 3:return {value:Math.min(s.elapsed/60,s.eaten/30),target:1,label:`存活 ${Math.floor(s.elapsed)}/60秒 · 吞噬 ${s.eaten}/30`,done:s.elapsed>=60&&s.eaten>=30};
     case 4:case 10:return {value:s.bossTotal-s.bossHP,target:s.bossTotal,label:s.bossHP?`击败${level.id===4?'面包屑王':'熔岩领主'} · 虚弱时碰撞反击`:'Boss 已击败',done:s.bossHP<=0};
