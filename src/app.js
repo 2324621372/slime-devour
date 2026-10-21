@@ -53,6 +53,31 @@ function displayRadius(){return visibleRadius(state.radius);}
 function outsideView(x,z,r=1){camera.updateMatrixWorld();const frustum=new THREE.Frustum().setFromProjectionMatrix(new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix,camera.matrixWorldInverse));return !frustum.intersectsSphere(new THREE.Sphere(new THREE.Vector3(x,r*.7,z),r*2));}
 function entityPosition(r=.5,offscreen=true){for(let i=0;i<180;i++){const angle=Math.random()*Math.PI*2,range=offscreen?cameraDistance(state.radius)*(.9+Math.random()*2)+r*3:5+Math.random()*30;const x=playerPos.x+Math.cos(angle)*range,z=playerPos.y+Math.sin(angle)*range;if(Math.abs(x)+r>MAP_EDGE||Math.abs(z)+r>MAP_EDGE||blocked(x,z,r))continue;if(offscreen&&!outsideView(x,z,r))continue;if(entities.some(e=>Math.hypot(x-e.x,z-e.z)<r*1.6+(e.visual||e.radius)*1.6))continue;return {x,z};}return null;}
 function blocked(x,z,r=.4){return world.colliders.some(c=>Math.abs(x-c.x)<c.hx+r&&Math.abs(z-c.z)<c.hz+r);}
+function replenishPrey(){
+ // Keep food ahead of exploration without growing the active model budget.
+ const nearby=cameraDistance(state.radius)*3;
+ const localFood=entities.filter(e=>!e.threat&&canEat(state.radius,e.radius)&&Math.hypot(e.x-playerPos.x,e.z-playerPos.y)<nearby).length;
+ const edible=CATALOG.flatMap(c=>c.sizes.filter(r=>canEat(state.radius,r)).map(radius=>({kind:c.kind,preyStage:c.stage,radius})));
+ for(let i=0;i<3;i++){
+  const local=i<2&&localFood<45;
+  const item=local?edible[Math.floor(Math.random()*edible.length)]:catalogItem(spawnSequence++,Math.floor(spawnSequence/12));
+  if(!item)continue;
+  let pos=null;
+  if(local)pos=entityPosition(item.radius,true);
+  else for(let attempt=0;attempt<100;attempt++){
+   const r=item.radius,x=(Math.random()*2-1)*(MAP_EDGE-r),z=(Math.random()*2-1)*(MAP_EDGE-r);
+   if(!outsideView(x,z,r)||blocked(x,z,r)||entities.some(e=>Math.hypot(e.x-x,e.z-z)<1.6*(r+e.radius)))continue;
+   pos={x,z};break;
+  }
+  if(!pos)continue;
+  if(entities.filter(e=>!e.threat).length>=370){
+   const counts=new Map();for(const e of entities)if(!e.threat)counts.set(e.kind,(counts.get(e.kind)||0)+1);
+   const distant=entities.filter(e=>!e.threat&&counts.get(e.kind)>6&&outsideView(e.x,e.z,e.radius)&&Math.hypot(e.x-playerPos.x,e.z-playerPos.y)>nearby).sort((a,b)=>Math.hypot(b.x-playerPos.x,b.z-playerPos.y)-Math.hypot(a.x-playerPos.x,a.z-playerPos.y))[0];
+   if(!distant)continue;removeEntity(distant);
+  }
+  makePrey(false,item,pos);
+ }
+}
 function makePrey(initial=false,descriptor=null,pos=null){
  if(entities.filter(e=>!e.threat).length>=370)return;
  const item=descriptor||catalogItem(spawnSequence++,Math.floor(spawnSequence/12));
@@ -72,7 +97,7 @@ function populate(){
  for(let tier=5;tier>=0;tier--)for(let i=0;i<36;i++){
   const item=catalogItem(tier*2+i%2,Math.floor(i/2));let pos=null;
   for(let attempt=0;attempt<220;attempt++){
-   const angle=i*2.399+attempt*.61,inner=[2,4,11,30,90,250][tier],range=inner+Math.random()*[48,65,100,180,370,640][tier];const x=Math.cos(angle)*range,z=3+Math.sin(angle)*range,r=item.radius;
+    const angle=i*2.399+attempt*.61,inner=[2,4,11,30,90,250][tier],range=inner+Math.random()*[48,65,100,180,370,640][tier];const remote=i>=12,x=remote?(Math.random()*2-1)*(MAP_EDGE-item.radius):Math.cos(angle)*range,z=remote?(Math.random()*2-1)*(MAP_EDGE-item.radius):3+Math.sin(angle)*range,r=item.radius;
    if(Math.abs(x)+r>MAP_EDGE||Math.abs(z)+r>MAP_EDGE||Math.hypot(x,z-3)<r*2+2||blocked(x,z,r)||entities.some(e=>Math.hypot(x-e.x,z-e.z)<r*1.3+e.radius*1.3))continue;pos={x,z};break;
   }
   if(pos)makePrey(true,item,pos);
@@ -206,7 +231,7 @@ function update(dt){
   const edible=!e.threat&&canEat(state.radius,e.radius);e.mesh.userData.body?.material?.emissive.setHex(edible?0x092119:0x000000);
   if(e.threat&&dist<pr*.94+e.visual*.8)damage();
  }
- spawnClock+=dt;if(spawnClock>=Math.max(.45,level.spawnInterval*(mode==='endless'?Math.max(.35,1-stage*.1):1))){spawnClock=0;for(let i=0;i<3;i++)makePrey();if(entities.filter(e=>e.threat).length<(mode==='endless'?Math.min(8,2+stage):Math.min(level.maxThreats,level.initialThreats)))makeThreat();}
+ spawnClock+=dt;if(spawnClock>=Math.max(.45,level.spawnInterval*(mode==='endless'?Math.max(.35,1-stage*.1):1))){spawnClock=0;replenishPrey();if(entities.filter(e=>e.threat).length<(mode==='endless'?Math.min(8,2+stage):Math.min(level.maxThreats,level.initialThreats)))makeThreat();}
  for(const h of hazards){const active=state.elapsed%6>3;h.mesh.visible=active;if(active&&Math.abs(playerPos.x-h.x)<pr*.65+.1&&Math.abs(playerPos.y)<3.5)damage();}
  if(level.id===10&&Math.abs(playerPos.x)>7.8&&mode==='level')damage();
  if(mode==='endless'&&stage===5&&state.elapsed>=cityWaveAt&&(!boss||boss.hp<=0)){state.bossHP=3;state.bossTotal=3;spawnBoss();$('bossbar').hidden=false;cityWaveAt=state.elapsed+35;}
