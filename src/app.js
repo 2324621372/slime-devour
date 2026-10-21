@@ -7,6 +7,7 @@ import {preyModel,preyKind,PREY_NAMES,animateInsects} from './prey.js';
 import {resolveContact,anchored} from './physics.js';
 import {CATALOG,MAP_EDGE,catalogItem} from './population.js';
 import {createFloor} from './floor.js';
+import {addDistricts} from './districts.js';
 
 const $=id=>document.getElementById(id),clamp=THREE.MathUtils.clamp;
 const SAVE_KEY='slime-devour-v1';
@@ -42,6 +43,7 @@ function loadWorld(nextTheme){
  disposeWorld();world=createWorld(nextTheme);scene=world.scene;camera=world.camera;theme=nextTheme;
  scene.fog.near=1800;scene.fog.far=3200;camera.far=5000;camera.near=.05;camera.updateProjectionMatrix();
  scene.add(createFloor(MAP_EDGE,world.palette));
+ world.districts=addDistricts(scene,world.colliders,theme,MAP_EDGE);
  dynamic=new THREE.Group();dynamic.userData.dynamic=true;scene.add(dynamic);
  camera.position.set(15.5,23,26);camera.lookAt(0,0,-1);resize();
  scene.traverse(o=>{if(o.isLight&&o.shadow)o.castShadow=!qualityLow;});
@@ -220,5 +222,5 @@ try{
  renderer.domElement.addEventListener('webglcontextlost',e=>{e.preventDefault();showPause();toast('图形上下文暂时中断，请刷新恢复');});
  loadWorld(0);applyQuality();start(1,'level');requestAnimationFrame(animate);
  // Read-only diagnostics help verify offline and mobile builds without altering play.
- Object.defineProperty(window,'slimeGame',{value:{snapshot:()=>({...state,mode,level:level.id,paused,ended,entities:entities.length,frame,drawCalls:renderer.info.render.calls,qualityLow,stage,stageName:STAGES[stage].name,visualRadius:displayRadius(),camera:{x:camera.position.x,y:camera.position.y,z:camera.position.z,distance:camera.position.distanceTo(camTarget),target:{x:camTarget.x,y:camTarget.y,z:camTarget.z},playerNDC:player.position.clone().add(new THREE.Vector3(0,displayRadius()*.45,0)).project(camera).toArray()},position:{x:playerPos.x,z:playerPos.y},animation:{gait:player.userData.gait,eatPulse:player.userData.eatPulse,swallows:swallows.length,scale:player.scale.toArray(),height:player.position.y},mapEdge:MAP_EDGE,sceneryColliders:world.colliders.length,spawnChecks:[...spawnChecks],prey:entities.filter(e=>!e.threat).map(e=>({id:e.id,scale:e.mesh.scale.x,heading:e.heading,gait:e.walkTime||0,x:e.x,z:e.z,radius:e.radius,kind:e.kind,name:PREY_NAMES[e.kind],stage:e.preyStage,edible:canEat(state.radius,e.radius)})),saved:JSON.parse(JSON.stringify(save))})}});
+ Object.defineProperty(window,'slimeGame',{value:{snapshot:()=>({...state,mode,level:level.id,paused,ended,entities:entities.length,frame,drawCalls:renderer.info.render.calls,qualityLow,stage,stageName:STAGES[stage].name,visualRadius:displayRadius(),camera:{x:camera.position.x,y:camera.position.y,z:camera.position.z,distance:camera.position.distanceTo(camTarget),target:{x:camTarget.x,y:camTarget.y,z:camTarget.z},playerNDC:player.position.clone().add(new THREE.Vector3(0,displayRadius()*.45,0)).project(camera).toArray()},position:{x:playerPos.x,z:playerPos.y},animation:{gait:player.userData.gait,eatPulse:player.userData.eatPulse,swallows:swallows.length,scale:player.scale.toArray(),height:player.position.y},mapEdge:MAP_EDGE,districts:world.districts,sceneryColliders:world.colliders.length,spawnChecks:[...spawnChecks],prey:entities.filter(e=>!e.threat).map(e=>({id:e.id,scale:e.mesh.scale.x,heading:e.heading,gait:e.walkTime||0,x:e.x,z:e.z,radius:e.radius,kind:e.kind,name:PREY_NAMES[e.kind],stage:e.preyStage,edible:canEat(state.radius,e.radius)})),saved:JSON.parse(JSON.stringify(save))})}});
 }catch(error){console.error(error);$('loading').hidden=true;$('error').hidden=false;$('error').textContent='无法启动 3D 画面。请使用支持 WebGL 2 的新版 Chrome、Edge 或 Safari，并开启浏览器硬件加速。';}
