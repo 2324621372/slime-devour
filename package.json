@@ -1,0 +1,13 @@
+{
+  "name": "slime-devour-endless",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "node --test tests/rules.test.mjs",
+    "test:browser": "node tests/browser.cjs"
+  },
+  "dependencies": {"three": "0.186.1"},
+  "devDependencies": {"esbuild": "0.28.2", "@playwright/test": "1.58.0"}
+}

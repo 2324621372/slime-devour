@@ -1,0 +1,10 @@
+import {build} from 'esbuild';
+import {readFile,writeFile,mkdir} from 'node:fs/promises';
+const result=await build({entryPoints:['src/app.js'],bundle:true,minify:true,write:false,format:'iife',target:['es2020'],legalComments:'inline'});
+let html=await readFile('index.html','utf8');
+const css=await readFile('src/style.css','utf8');
+html=html.replace('<link rel="stylesheet" href="src/style.css">',()=>`<style>${css}</style>`);
+html=html.replace('<script type="module" src="src/app.js"></script>',()=>`<script>${result.outputFiles[0].text.replace(/<\/script/gi,'<\\/script')}</script>`);
+if(/<(?:script|link)[^>]+(?:src|href)="(?!data:)/i.test(html))throw new Error('External dependency remains');
+await mkdir('public',{recursive:true});await writeFile('public/index.html',html);await writeFile('public/.nojekyll','');
+console.log(`Built offline single HTML: ${(Buffer.byteLength(html)/1024/1024).toFixed(2)} MiB`);
